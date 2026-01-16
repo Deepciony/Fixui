@@ -1,0 +1,45 @@
+/* Deprecated: moved to src/routes/organizer/app.css */
+/* Kept as an empty placeholder to avoid build errors during transition. */
+
+.header-bar {
+  width: 100%;
+  height: var(--nav-height);
+  background-color: var(--bg-nav);
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+}
+
+.menu-btn { background: transparent; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 0.9rem; font-weight: 600; color: var(--text-muted); transition: all 0.15s ease; }
+.menu-btn:hover { color: var(--text-main); background-color: rgba(255,255,255,0.03); }
+
+.mobile-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 70vw; max-width: 320px; background: var(--bg-nav); z-index: 2001; padding: 20px; display: flex; flex-direction: column; box-shadow: -5px 0 20px rgba(0,0,0,0.5); }
+
+.jump-btn { background: transparent; border: 1px solid var(--text-muted); color: var(--text-muted); padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: 0.15s; }
+.jump-btn:hover { border-color: var(--primary); color: var(--primary); background: rgba(16,185,129,0.06); }
+
+.action-submit-btn { width: 100%; padding: 12px 16px; background: var(--primary); color: var(--primary-dark); border: none; border-radius: 10px; font-weight: 800; font-size: 1rem; cursor: pointer; transition: 0.15s; }
+
+/* Cards and layout */
+.card {
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+}
+
+.text-muted { color: var(--text-muted); }
+
+/* Utility */
+.center { display:flex; align-items:center; justify-content:center; }
+.error { color: #ff6b6b; }
+
+/* Small responsive tweaks */
+@media (max-width: 640px) {
+  :root { --nav-height: 64px; }
+  .common-page-padding { padding-top: calc(var(--nav-height) + 16px) !important; }
+}
