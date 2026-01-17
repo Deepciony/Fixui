@@ -97,6 +97,11 @@ function createLogsStore() {
       }));
     },
     
+    // ✅ เพิ่มฟังก์ชันนี้เพื่อให้ +page.svelte เรียกใช้ได้
+    setWebSocketConnected: (connected: boolean) => {
+      update(state => ({ ...state, wsConnected: connected }));
+    },
+    
     setExportFormat: (format: 'csv' | 'excel' | 'pdf') => {
       if (typeof window !== 'undefined') {
         localStorage.setItem('logs_export_format', format);

@@ -1,376 +1,321 @@
-=== ./general/+page.svelte ===
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import { eventForm } from '../../_lib/stores/eventForm';
   import { appState } from '../../_lib/stores/appState';
-  import { goto } from '$app/navigation';
-  import { page } from '$app/stores';
-  import { onMount } from 'svelte';
-  import api from '../../_lib/api/client';
-  import { endpoints } from '../../_lib/api/endpoints';
   import { t } from '../../_lib/i18n';
-  import { validateRequired } from '../../_lib/utils/validation';
-  
-  let imageInput: HTMLInputElement;
+  import { onMount } from 'svelte';
   
   $: lang = $appState.currentLang;
   
-  // Load event if editing
-  onMount(async () => {
-    const eventId = $page.url.searchParams.get('id');
-    if (eventId) {
-      try {
-        const response = await api.get(endpoints.events.get(parseInt(eventId)));
-        const event = response.data;
-        
-        eventForm.update(state => ({
-          ...state,
-          editingEventId: event.id,
-          title: event.title,
-          description: event.description,
-          location: event.location,
-          imagePreview: event.imageUrl,
-          eventType: event.eventType,
-          allowDailyCheckin: event.allowDailyCheckin || false,
-          maxCheckinsPerUser: event.maxCheckinsPerUser || 1,
-          startDate: parseDate(event.startDate),
-          endDate: parseDate(event.endDate),
-          startTime: event.startTime,
-          endTime: event.endTime
-        }));
-      } catch (error) {
-        console.error('Error loading event:', error);
-      }
+  let ce_fileInput: HTMLInputElement;
+  let ce_activeDropdown: string | null = null;
+  let ce_formData = {
+    imagePreview: null as string | null,
+    imageFile: null as File | null,
+    title: '',
+    description: '',
+    location: '',
+    eventType: 'single_day',
+    maxCheckinsPerUser: 1
+  };
+  
+  let ce_validationErrors = new Set<string>();
+  
+  onMount(() => {
+    const storeData = $eventForm as any;
+    if (storeData.title) {
+      ce_formData = { ...storeData };
     }
   });
   
-  function parseDate(dateStr: string) {
-    const d = new Date(dateStr);
-    return {
-      day: d.getDate().toString(),
-      month: (d.getMonth() + 1).toString(),
-      year: d.getFullYear().toString()
-    };
+  function ce_trigFile() {
+    ce_fileInput?.click();
   }
   
-  function handleImageUpload(event: Event) {
-    const target = event.target as HTMLInputElement;
-    const file = target.files?.[0];
-    
+  function ce_handleImg(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
     if (file) {
       if (file.size > 5 * 1024 * 1024) {
         alert(lang === 'th' ? 'ไฟล์ใหญ่เกิน 5MB' : 'File size exceeds 5MB');
         return;
       }
-      
+      ce_formData.imageFile = file;
       const reader = new FileReader();
-      reader.onload = (e) => {
-        eventForm.update(state => ({
-          ...state,
-          imagePreview: e.target?.result as string,
-          imageFile: file
-        }));
+      reader.onload = (ev) => {
+        ce_formData.imagePreview = ev.target?.result as string;
       };
       reader.readAsDataURL(file);
     }
   }
   
-  function removeImage() {
-    eventForm.update(state => ({
-      ...state,
-      imagePreview: null,
-      imageFile: null
-    }));
-    if (imageInput) imageInput.value = '';
+  function ce_setEventType(type: 'single_day' | 'multi_day') {
+    ce_formData.eventType = type;
+    if (type === 'single_day') {
+      ce_formData.maxCheckinsPerUser = 1;
+    }
   }
   
   function validateForm(): boolean {
-    const errors = new Map();
+    ce_validationErrors.clear();
     
-    if (!validateRequired($eventForm.title)) {
-      errors.set('title', lang === 'th' ? 'กรุณากรอกชื่อกิจกรรม' : 'Event name is required');
-    }
+    if (!ce_formData.title.trim()) ce_validationErrors.add('title');
+    if (!ce_formData.description.trim()) ce_validationErrors.add('description');
+    if (!ce_formData.location.trim()) ce_validationErrors.add('location');
     
-    if (!validateRequired($eventForm.location)) {
-      errors.set('location', lang === 'th' ? 'กรุณากรอกสถานที่' : 'Location is required');
-    }
-    
-    if (!validateRequired($eventForm.startDate.year)) {
-      errors.set('startDate', lang === 'th' ? 'กรุณาเลือกวันที่เริ่ม' : 'Start date is required');
-    }
-    
-    if (!validateRequired($eventForm.endDate.year)) {
-      errors.set('endDate', lang === 'th' ? 'กรุณาเลือกวันที่สิ้นสุด' : 'End date is required');
-    }
-    
-    if (!validateRequired($eventForm.startTime)) {
-      errors.set('startTime', lang === 'th' ? 'กรุณากรอกเวลาเริ่ม' : 'Start time is required');
-    }
-    
-    if (!validateRequired($eventForm.endTime)) {
-      errors.set('endTime', lang === 'th' ? 'กรุณากรอกเวลาสิ้นสุด' : 'End time is required');
-    }
-    
-    eventForm.update(state => ({
-      ...state,
-      validationErrors: errors
-    }));
-    
-    return errors.size === 0;
+    ce_validationErrors = new Set(ce_validationErrors);
+    return ce_validationErrors.size === 0;
   }
   
   function handleNext() {
-    if (validateForm()) {
-      goto('/organizer/create-event/capacity');
+    if (!validateForm()) {
+      return;
     }
+    
+    eventForm.set(ce_formData as any);
+    goto('/organizer/create-event/capacity');
+  }
+  
+  function handleSaveDraft() {
+    eventForm.set({ ...ce_formData, status: 'draft' } as any);
+    alert(lang === 'th' ? 'บันทึกแบบร่างแล้ว' : 'Draft saved');
   }
 </script>
 
-<div class="form-section">
-  <h3 class="section-title">{t('general')}</h3>
-  
-  <!-- Title -->
-  <div class="form-group">
-    <label for="title">
-      {lang === 'th' ? 'ชื่อกิจกรรม' : 'Event Name'}
-      <span class="required">*</span>
-    </label>
+<div class="ce-grid-layout">
+  <!-- Image Upload Section -->
+  <div
+    class="ce-card ce-img-card"
+    class:has-img={ce_formData.imagePreview}
+    role="button"
+    tabindex="0"
+    aria-label="Upload event image"
+    on:click={ce_trigFile}
+    on:keydown={(e) => {
+      if (e.key === "Enter" || e.key === " ") ce_trigFile();
+    }}
+  >
     <input
-      id="title"
-      type="text"
-      class:error={$eventForm.validationErrors.has('title')}
-      bind:value={$eventForm.title}
-      placeholder={lang === 'th' ? 'กรอกชื่อกิจกรรม' : 'Enter event name'}
+      type="file"
+      accept="image/*"
+      bind:this={ce_fileInput}
+      on:change={ce_handleImg}
+      hidden
     />
-    {#if $eventForm.validationErrors.has('title')}
-      <span class="error-message">{$eventForm.validationErrors.get('title')}</span>
-    {/if}
-  </div>
-  
-  <!-- Description -->
-  <div class="form-group">
-    <label for="description">
-      {lang === 'th' ? 'รายละเอียด' : 'Description'}
-    </label>
-    <textarea
-      id="description"
-      bind:value={$eventForm.description}
-      rows="4"
-      placeholder={lang === 'th' ? 'กรอกรายละเอียดกิจกรรม' : 'Enter event description'}
-    ></textarea>
-  </div>
-  
-  <!-- Location -->
-  <div class="form-group">
-    <label for="location">
-      {lang === 'th' ? 'สถานที่' : 'Location'}
-      <span class="required">*</span>
-    </label>
-    <input
-      id="location"
-      type="text"
-      class:error={$eventForm.validationErrors.has('location')}
-      bind:value={$eventForm.location}
-      placeholder={lang === 'th' ? 'กรอกสถานที่จัดกิจกรรม' : 'Enter event location'}
-    />
-    {#if $eventForm.validationErrors.has('location')}
-      <span class="error-message">{$eventForm.validationErrors.get('location')}</span>
-    {/if}
-  </div>
-  
-  <!-- Image Upload -->
-  <div class="form-group">
-    <label>
-      {lang === 'th' ? 'รูปภาพกิจกรรม' : 'Event Image'}
-    </label>
-    
-    {#if $eventForm.imagePreview}
-      <div class="image-preview">
-        <img src={$eventForm.imagePreview} alt="Event preview" />
-        <button class="btn-remove-image" on:click={removeImage} type="button">
-          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+    {#if ce_formData.imagePreview}
+      <img
+        src={ce_formData.imagePreview}
+        alt="Preview"
+        class="ce-preview-img"
+      />
+      <div class="ce-overlay">
+        <span>{lang === 'th' ? 'เปลี่ยนรูปภาพ' : 'Change Image'}</span>
       </div>
     {:else}
-      <div class="upload-area">
-        <input
-          type="file"
-          accept="image/*"
-          on:change={handleImageUpload}
-          bind:this={imageInput}
-          id="image-upload"
-          hidden
-        />
-        <label for="image-upload" class="upload-label">
+      <div class="ce-upload-placeholder">
+        <div class="ce-icon-upload">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+            ></path>
           </svg>
-          <span>{lang === 'th' ? 'คลิกเพื่ออัพโหลดรูปภาพ' : 'Click to upload image'}</span>
-          <span class="upload-hint">PNG, JPG (max 5MB)</span>
-        </label>
+        </div>
+        <span>{lang === 'th' ? 'อัพโหลดแบนเนอร์กิจกรรม' : 'Upload Event Banner'}</span>
       </div>
     {/if}
   </div>
-  
+
+  <!-- Basic Info -->
+  <div class="ce-card ce-form-card">
+    <div class="ce-card-head">
+      <svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+        ></path>
+      </svg>
+      <span>{lang === 'th' ? 'ข้อมูลพื้นฐาน' : 'Basic Information'}</span>
+    </div>
+
+    <div class="ce-input-group">
+      <label for="event-title">{t('eventName')} <span class="ce-req">*</span></label>
+      <input
+        id="event-title"
+        type="text"
+        bind:value={ce_formData.title}
+        placeholder={lang === 'th' ? 'ชื่อกิจกรรมอย่างเป็นทางการ' : 'Official Event Name'}
+        class="ce-input"
+        class:error={ce_validationErrors.has('title')}
+      />
+    </div>
+
+    <div class="ce-input-group">
+      <label for="event-desc">{t('description')} <span class="ce-req">*</span></label>
+      <textarea
+        id="event-desc"
+        bind:value={ce_formData.description}
+        placeholder={lang === 'th' ? 'รายละเอียดกิจกรรม...' : 'Event details...'}
+        class="ce-textarea"
+        class:error={ce_validationErrors.has('description')}
+      ></textarea>
+    </div>
+
+    <div class="ce-input-group">
+      <label for="event-location">{t('location')} <span class="ce-req">*</span></label>
+      <input
+        id="event-location"
+        type="text"
+        bind:value={ce_formData.location}
+        placeholder={lang === 'th' ? 'สถานที่จัดกิจกรรม' : 'Location'}
+        class="ce-input"
+        class:error={ce_validationErrors.has('location')}
+      />
+    </div>
+  </div>
+
   <!-- Event Type -->
-  <div class="form-group">
-    <label>{lang === 'th' ? 'ประเภทกิจกรรม' : 'Event Type'}</label>
-    <div class="radio-group">
-      <label class="radio-label">
-        <input
-          type="radio"
-          bind:group={$eventForm.eventType}
-          value="single_day"
-        />
-        <div class="radio-content">
-          <span class="radio-title">{lang === 'th' ? 'วันเดียว' : 'Single Day'}</span>
-          <span class="radio-desc">{lang === 'th' ? 'เช็คอินได้ 1 ครั้ง' : 'One check-in only'}</span>
-        </div>
-      </label>
-      
-      <label class="radio-label">
-        <input
-          type="radio"
-          bind:group={$eventForm.eventType}
-          value="multi_day"
-        />
-        <div class="radio-content">
-          <span class="radio-title">{lang === 'th' ? 'หลายวัน' : 'Multi Day'}</span>
-          <span class="radio-desc">{lang === 'th' ? 'เช็คอินได้หลายครั้ง' : 'Multiple check-ins'}</span>
-        </div>
-      </label>
+  <div class="ce-card ce-config-card">
+    <div class="ce-card-head">
+      <svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+        ></path>
+      </svg>
+      <span>{t('eventTypeTitle')}</span>
     </div>
-  </div>
-  
-  {#if $eventForm.eventType === 'multi_day'}
-    <div class="form-group">
-      <label for="max-checkins">
-        {lang === 'th' ? 'จำนวนเช็คอินสูงสุดต่อคน' : 'Max Check-ins Per User'}
-      </label>
-      <input
-        id="max-checkins"
-        type="number"
-        min="1"
-        bind:value={$eventForm.maxCheckinsPerUser}
-      />
-    </div>
-  {/if}
-  
-  <!-- Date Range -->
-  <div class="form-row">
-    <div class="form-group">
-      <label>
-        {lang === 'th' ? 'วันที่เริ่ม' : 'Start Date'}
-        <span class="required">*</span>
-      </label>
-      <div class="date-inputs">
-        <input
-          type="number"
-          placeholder={lang === 'th' ? 'วัน' : 'Day'}
-          min="1"
-          max="31"
-          class:error={$eventForm.validationErrors.has('startDate')}
-          bind:value={$eventForm.startDate.day}
-        />
-        <input
-          type="number"
-          placeholder={lang === 'th' ? 'เดือน' : 'Month'}
-          min="1"
-          max="12"
-          class:error={$eventForm.validationErrors.has('startDate')}
-          bind:value={$eventForm.startDate.month}
-        />
-        <input
-          type="number"
-          placeholder={lang === 'th' ? 'ปี' : 'Year'}
-          min="2024"
-          class:error={$eventForm.validationErrors.has('startDate')}
-          bind:value={$eventForm.startDate.year}
-        />
+
+    <div class="ce-event-type-control">
+      <div class="ce-event-type-buttons">
+        <button
+          type="button"
+          class="ce-event-type-btn"
+          class:active={ce_formData.eventType === 'single_day'}
+          on:click={() => ce_setEventType('single_day')}
+        >
+          <div class="ce-event-type-icon">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+              ></path>
+            </svg>
+          </div>
+          <div class="ce-event-type-content">
+            <span class="ce-event-type-title">{t('singleDay')}</span>
+            <span class="ce-event-type-desc">{t('singleDayDesc')}</span>
+          </div>
+          {#if ce_formData.eventType === 'single_day'}
+            <div class="ce-event-type-check">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                ></path>
+              </svg>
+            </div>
+          {/if}
+        </button>
+
+        <button
+          type="button"
+          class="ce-event-type-btn"
+          class:active={ce_formData.eventType === 'multi_day'}
+          on:click={() => ce_setEventType('multi_day')}
+        >
+          <div class="ce-event-type-icon">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2zM9 12h.01M15 12h.01M9 16h.01M15 16h.01"
+              ></path>
+            </svg>
+          </div>
+          <div class="ce-event-type-content">
+            <span class="ce-event-type-title">{t('multiDay')}</span>
+            <span class="ce-event-type-desc">{t('multiDayDesc')}</span>
+          </div>
+          {#if ce_formData.eventType === 'multi_day'}
+            <div class="ce-event-type-check">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                ></path>
+              </svg>
+            </div>
+          {/if}
+        </button>
       </div>
-      {#if $eventForm.validationErrors.has('startDate')}
-        <span class="error-message">{$eventForm.validationErrors.get('startDate')}</span>
-      {/if}
-    </div>
-    
-    <div class="form-group">
-      <label>
-        {lang === 'th' ? 'วันที่สิ้นสุด' : 'End Date'}
-        <span class="required">*</span>
-      </label>
-      <div class="date-inputs">
-        <input
-          type="number"
-          placeholder={lang === 'th' ? 'วัน' : 'Day'}
-          min="1"
-          max="31"
-          class:error={$eventForm.validationErrors.has('endDate')}
-          bind:value={$eventForm.endDate.day}
-        />
-        <input
-          type="number"
-          placeholder={lang === 'th' ? 'เดือน' : 'Month'}
-          min="1"
-          max="12"
-          class:error={$eventForm.validationErrors.has('endDate')}
-          bind:value={$eventForm.endDate.month}
-        />
-        <input
-          type="number"
-          placeholder={lang === 'th' ? 'ปี' : 'Year'}
-          min="2024"
-          class:error={$eventForm.validationErrors.has('endDate')}
-          bind:value={$eventForm.endDate.year}
-        />
-      </div>
-      {#if $eventForm.validationErrors.has('endDate')}
-        <span class="error-message">{$eventForm.validationErrors.get('endDate')}</span>
-      {/if}
-    </div>
-  </div>
-  
-  <!-- Time Range -->
-  <div class="form-row">
-    <div class="form-group">
-      <label for="start-time">
-        {lang === 'th' ? 'เวลาเริ่ม' : 'Start Time'}
-        <span class="required">*</span>
-      </label>
-      <input
-        id="start-time"
-        type="time"
-        class:error={$eventForm.validationErrors.has('startTime')}
-        bind:value={$eventForm.startTime}
-      />
-      {#if $eventForm.validationErrors.has('startTime')}
-        <span class="error-message">{$eventForm.validationErrors.get('startTime')}</span>
-      {/if}
-    </div>
-    
-    <div class="form-group">
-      <label for="end-time">
-        {lang === 'th' ? 'เวลาสิ้นสุด' : 'End Time'}
-        <span class="required">*</span>
-      </label>
-      <input
-        id="end-time"
-        type="time"
-        class:error={$eventForm.validationErrors.has('endTime')}
-        bind:value={$eventForm.endTime}
-      />
-      {#if $eventForm.validationErrors.has('endTime')}
-        <span class="error-message">{$eventForm.validationErrors.get('endTime')}</span>
+
+      {#if ce_formData.eventType === 'multi_day'}
+        <div class="ce-checkin-section">
+          <span class="ce-checkin-label">{t('maxCheckinsPerUser')}</span>
+          <div class="ce-checkin-stepper">
+            <button
+              type="button"
+              class="ce-stepper-btn minus"
+              aria-label="Decrease"
+              on:click={() => {
+                if (ce_formData.maxCheckinsPerUser > 1) {
+                  ce_formData.maxCheckinsPerUser--;
+                }
+              }}
+              disabled={ce_formData.maxCheckinsPerUser <= 1}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 12H6"></path>
+              </svg>
+            </button>
+            <div class="ce-stepper-value">
+              {ce_formData.maxCheckinsPerUser}
+            </div>
+            <button
+              type="button"
+              class="ce-stepper-btn plus"
+              aria-label="Increase"
+              on:click={() => {
+                if (ce_formData.maxCheckinsPerUser < 365) {
+                  ce_formData.maxCheckinsPerUser++;
+                }
+              }}
+              disabled={ce_formData.maxCheckinsPerUser >= 365}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"></path>
+              </svg>
+            </button>
+            <span class="ce-stepper-unit">{t('checkinTimes')}</span>
+          </div>
+        </div>
       {/if}
     </div>
   </div>
-  
-  <!-- Actions -->
-  <div class="form-actions">
-    <button class="btn-secondary" on:click={() => goto('/organizer/events')} type="button">
-      {t('cancel')}
+
+  <!-- Navigation Buttons -->
+  <div class="ce-nav-buttons">
+    <button type="button" class="ce-btn-secondary" on:click={handleSaveDraft}>
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+      </svg>
+      {lang === 'th' ? 'บันทึกแบบร่าง' : 'Save Draft'}
     </button>
-    <button class="btn-primary" on:click={handleNext} type="button">
+    <button type="button" class="ce-btn-save" on:click={handleNext}>
       {t('next')}
       <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
@@ -380,252 +325,473 @@
 </div>
 
 <style>
-  .form-section {
-    background: white;
-    border-radius: 12px;
-    padding: 2rem;
-    box-shadow: var(--shadow-sm);
-  }
-  
-  .section-title {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: var(--text);
-    margin: 0 0 2rem;
-  }
-  
-  .form-group {
-    margin-bottom: 1.5rem;
-  }
-  
-  .form-group label {
-    display: block;
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--text);
-    margin-bottom: 0.5rem;
-  }
-  
-  .required {
-    color: var(--error);
-  }
-  
-  .form-group input:not([type="radio"]),
-  .form-group textarea {
-    width: 100%;
-    padding: 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    font-size: 0.875rem;
-    transition: all 0.2s;
-  }
-  
-  .form-group input:focus,
-  .form-group textarea:focus {
-    outline: none;
-    border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.1);
-  }
-  
-  .form-group input.error,
-  .form-group textarea.error {
-    border-color: var(--error);
-  }
-  
-  .error-message {
-    display: block;
-    color: var(--error);
-    font-size: 0.75rem;
-    margin-top: 0.25rem;
-  }
-  
-  .image-preview {
+  /* Grid Layout */
+  .ce-grid-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    max-width: 900px;
+    margin: 0 auto;
     position: relative;
-    width: 100%;
-    max-width: 400px;
-    border-radius: 8px;
+    z-index: 10;
+  }
+
+  /* Card Styles */
+  .ce-card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 20px;
+    padding: 24px;
+    position: relative;
+    box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.3);
+    overflow: visible;
+  }
+
+  .ce-card-head {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #f1f5f9;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid #334155;
+    padding-bottom: 15px;
+    margin-bottom: 20px;
+  }
+
+  .ce-icon-svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    color: #10b981;
+  }
+
+  /* Image Upload */
+  .ce-img-card {
+    padding: 0;
+    min-height: 280px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    border: 2px dashed #334155;
+    background: #0f172a;
+    transition: 0.2s;
     overflow: hidden;
   }
-  
-  .image-preview img {
-    width: 100%;
-    height: auto;
-    display: block;
+
+  .ce-img-card:hover {
+    border-color: #10b981;
+    background: #131c31;
   }
-  
-  .btn-remove-image {
-    position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
+
+  .ce-img-card.has-img {
+    border-style: solid;
+    border-color: #334155;
+  }
+
+  .ce-preview-img {
+    width: 100%;
+    height: 280px;
+    object-fit: cover;
+  }
+
+  .ce-upload-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    color: #64748b;
+    font-weight: 500;
+  }
+
+  .ce-icon-upload {
+    width: 60px;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(16, 185, 129, 0.1);
+    border-radius: 50%;
+    margin-bottom: 5px;
+  }
+
+  .ce-icon-upload svg {
     width: 32px;
     height: 32px;
-    padding: 0;
+    color: #10b981;
+  }
+
+  .ce-overlay {
+    position: absolute;
+    inset: 0;
     background: rgba(0, 0, 0, 0.6);
-    border: none;
-    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     color: white;
-    cursor: pointer;
+    font-weight: 600;
+    opacity: 0;
+    transition: 0.2s;
+    backdrop-filter: blur(4px);
+  }
+
+  .ce-img-card:hover .ce-overlay {
+    opacity: 1;
+  }
+
+  /* Input Styles */
+  .ce-input-group {
+    margin-bottom: 1.2rem;
+  }
+
+  .ce-input-group:last-child {
+    margin-bottom: 0;
+  }
+
+  .ce-input-group label {
+    display: block;
+    color: #94a3b8;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .ce-req {
+    color: #ef4444;
+    margin-left: 4px;
+  }
+
+  .ce-input,
+  .ce-textarea {
+    width: 100%;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 0 14px;
+    color: white;
+    height: 48px;
+    font-size: 0.95rem;
     transition: all 0.2s;
   }
-  
-  .btn-remove-image:hover {
-    background: rgba(0, 0, 0, 0.8);
+
+  .ce-textarea {
+    height: auto;
+    min-height: 140px;
+    padding: 14px;
+    resize: vertical;
+    line-height: 1.6;
   }
-  
-  .btn-remove-image svg {
-    width: 18px;
-    height: 18px;
+
+  .ce-input:focus,
+  .ce-textarea:focus {
+    border-color: #10b981;
+    outline: none;
+    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.1);
   }
-  
-  .upload-area {
-    border: 2px dashed var(--border);
-    border-radius: 8px;
-    padding: 2rem;
-    text-align: center;
-    transition: all 0.2s;
+
+  .ce-input.error,
+  .ce-textarea.error {
+    border-color: #ef4444 !important;
+    animation: ceShake 0.4s;
   }
-  
-  .upload-area:hover {
-    border-color: var(--primary);
-    background: var(--bg-alt);
+
+  @keyframes ceShake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
   }
-  
-  .upload-label {
+
+  /* Event Type Styles */
+  .ce-event-type-control {
+    padding: 0;
+  }
+
+  .ce-event-type-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .ce-event-type-btn {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.5rem;
+    gap: 12px;
+    padding: 20px 16px;
+    background: #0f172a;
+    border: 2px solid #334155;
+    border-radius: 16px;
     cursor: pointer;
-    color: var(--text-muted);
+    transition: all 0.25s ease;
+    position: relative;
+    text-align: center;
   }
-  
-  .upload-label svg {
+
+  .ce-event-type-btn:hover {
+    border-color: #64748b;
+    background: #162032;
+    transform: translateY(-2px);
+  }
+
+  .ce-event-type-btn.active {
+    border-color: #10b981;
+    background: rgba(16, 185, 129, 0.08);
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.15);
+  }
+
+  .ce-event-type-icon {
     width: 48px;
     height: 48px;
-    color: var(--primary);
-  }
-  
-  .upload-hint {
-    font-size: 0.75rem;
-    color: var(--text-light);
-  }
-  
-  .radio-group {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1rem;
-  }
-  
-  .radio-label {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
-    padding: 1rem;
-    border: 2px solid var(--border);
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-  
-  .radio-label:hover {
-    border-color: var(--primary);
-    background: var(--bg-alt);
-  }
-  
-  .radio-label input[type="radio"] {
-    margin-top: 0.25rem;
-  }
-  
-  .radio-label input[type="radio"]:checked + .radio-content {
-    color: var(--primary);
-  }
-  
-  .radio-content {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-  
-  .radio-title {
-    font-weight: 600;
-    font-size: 0.875rem;
-  }
-  
-  .radio-desc {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-  }
-  
-  .form-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 1rem;
-  }
-  
-  .date-inputs {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1.5fr;
-    gap: 0.5rem;
-  }
-  
-  .form-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 1rem;
-    margin-top: 2rem;
-    padding-top: 2rem;
-    border-top: 1px solid var(--border);
-  }
-  
-  .btn-secondary,
-  .btn-primary {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.75rem 1.5rem;
-    border-radius: 8px;
-    font-size: 0.875rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
+    justify-content: center;
+    background: rgba(100, 116, 139, 0.15);
+    border-radius: 12px;
+    transition: all 0.25s ease;
   }
-  
-  .btn-secondary {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text);
+
+  .ce-event-type-btn.active .ce-event-type-icon {
+    background: rgba(16, 185, 129, 0.15);
   }
-  
-  .btn-secondary:hover {
-    background: var(--bg-hover);
+
+  .ce-event-type-icon svg {
+    width: 24px;
+    height: 24px;
+    color: #94a3b8;
+    transition: all 0.25s ease;
   }
-  
-  .btn-primary {
-    background: var(--primary);
+
+  .ce-event-type-btn.active .ce-event-type-icon svg {
+    color: #10b981;
+  }
+
+  .ce-event-type-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .ce-event-type-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #f1f5f9;
+  }
+
+  .ce-event-type-btn.active .ce-event-type-title {
+    color: #10b981;
+  }
+
+  .ce-event-type-desc {
+    font-size: 0.75rem;
+    color: #64748b;
+    line-height: 1.4;
+  }
+
+  .ce-event-type-check {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 24px;
+    height: 24px;
+    background: #10b981;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: scaleIn 0.2s ease;
+  }
+
+  .ce-event-type-check svg {
+    width: 14px;
+    height: 14px;
     color: white;
-    border: none;
   }
-  
-  .btn-primary:hover {
-    background: var(--primary-dark);
+
+  @keyframes scaleIn {
+    from {
+      transform: scale(0);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
   }
-  
-  .btn-primary svg {
+
+  /* Checkin Section */
+  .ce-checkin-section {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 16px;
+    padding: 16px 20px;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 12px;
+  }
+
+  .ce-checkin-label {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #e2e8f0;
+  }
+
+  .ce-checkin-stepper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ce-stepper-btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    color: #94a3b8;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .ce-stepper-btn svg {
     width: 18px;
     height: 18px;
   }
-  
-  @media (max-width: 768px) {
-    .form-section {
-      padding: 1.5rem;
-    }
-    
-    .form-row {
+
+  .ce-stepper-btn.minus:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #f87171;
+  }
+
+  .ce-stepper-btn.plus:hover:not(:disabled) {
+    background: rgba(16, 185, 129, 0.1);
+    border-color: rgba(16, 185, 129, 0.4);
+    color: #34d399;
+  }
+
+  .ce-stepper-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .ce-stepper-value {
+    min-width: 48px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #10b981;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.25);
+    border-radius: 10px;
+  }
+
+  .ce-stepper-unit {
+    color: #64748b;
+    font-size: 0.85rem;
+    margin-left: 4px;
+  }
+
+  /* Navigation Buttons */
+  .ce-nav-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+  }
+
+  .ce-btn-secondary {
+    background: transparent;
+    border: 1px solid #475569;
+    color: #94a3b8;
+    padding: 0.7rem 1.5rem;
+    border-radius: 12px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ce-btn-secondary svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .ce-btn-secondary:hover {
+    border-color: #e2e8f0;
+    color: #e2e8f0;
+  }
+
+  .ce-btn-save {
+    background: linear-gradient(135deg, #10b981, #059669);
+    border: none;
+    color: white;
+    padding: 0.7rem 2rem;
+    border-radius: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ce-btn-save svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .ce-btn-save:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+  }
+
+  /* Responsive */
+  @media (max-width: 640px) {
+    .ce-event-type-buttons {
       grid-template-columns: 1fr;
     }
-    
-    .radio-group {
-      grid-template-columns: 1fr;
+
+    .ce-event-type-btn {
+      flex-direction: row;
+      text-align: left;
+      padding: 16px;
+    }
+
+    .ce-event-type-icon {
+      width: 40px;
+      height: 40px;
+    }
+
+    .ce-event-type-content {
+      flex: 1;
+    }
+
+    .ce-checkin-section {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 14px;
+    }
+
+    .ce-nav-buttons {
+      flex-direction: column;
+    }
+
+    .ce-btn-secondary,
+    .ce-btn-save {
+      width: 100%;
+      justify-content: center;
     }
   }
 </style>

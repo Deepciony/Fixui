@@ -2,182 +2,165 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
-  
-  // Import stores (using relative path, can change to alias later)
-  import { appState } from './_lib/stores/appState';
-  import { auth } from './_lib/stores/auth';
-  import { t } from './_lib/i18n';
+  import './app.css';
   
   // ==========================================
-  // 📋 MENU CONFIGURATION
+  // 🌐 INTERNATIONALIZATION (from original)
   // ==========================================
-  const menuItems = [
-    {
-      id: 'events',
-      path: '/organizer/events',
-      label: { th: 'กิจกรรม', en: 'Events' },
-      icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01'
-    },
-    {
-      id: 'create-event',
-      path: '/organizer/create-event',
-      label: { th: 'สร้างกิจกรรม', en: 'Create Event' },
-      icon: 'M12 4v16m8-8H4'
-    },
-    {
-      id: 'verify-code',
-      path: '/organizer/verify-code',
-      label: { th: 'ตรวจรหัส', en: 'Verify Code' },
-      icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'
-    },
-    {
-      id: 'verify-proof',
-      path: '/organizer/verify-proof',
-      label: { th: 'ตรวจสอบหลักฐาน', en: 'Verify Proof' },
-      icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z'
-    },
-    {
-      id: 'unlock',
-      path: '/organizer/unlock',
-      label: { th: 'ปลดล็อค', en: 'Unlock' },
-      icon: 'M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z'
-    },
-    {
-      id: 'logs',
-      path: '/organizer/logs',
-      label: { th: 'ประวัติ', en: 'Logs' },
-      icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z'
-    },
-    {
-      id: 'rewards',
-      path: '/organizer/rewards',
-      label: { th: 'รางวัล', en: 'Rewards' },
-      icon: 'M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V6a2 2 0 10-2 2h2zm0 0h4l-4 4-4-4h4z'
-    },
-    {
-      id: 'settings',
-      path: '/organizer/settings',
-      label: { th: 'ตั้งค่า', en: 'Settings' },
-      icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z'
+  type Language = "th" | "en";
+  let currentLang: Language = "th";
+  
+  if (typeof localStorage !== "undefined") {
+    const savedLang = localStorage.getItem("app_language");
+    if (savedLang === "th" || savedLang === "en") {
+      currentLang = savedLang;
+    } else {
+      localStorage.setItem("app_language", "th");
     }
+  }
+  
+  function toggleLanguage() {
+    currentLang = currentLang === "th" ? "en" : "th";
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("app_language", currentLang);
+    }
+  }
+  
+  // Translation object (from original)
+  const translations = {
+    th: {
+      organizer: "ผู้จัดงาน",
+      events: "กิจกรรม",
+      createEvent: "สร้างกิจกรรม",
+      verifyCode: "ตรวจรหัส",
+      verifyProof: "ตรวจสอบหลักฐาน",
+      unlock: "ปลดล็อค",
+      logs: "ประวัติ",
+      rewards: "รางวัล",
+      settings: "ตั้งค่า",
+      logout: "ออกจากระบบ",
+      navigation: "เมนู",
+    },
+    en: {
+      organizer: "Organizer",
+      events: "Events",
+      createEvent: "Create Event",
+      verifyCode: "Verify Code",
+      verifyProof: "Verify Proof",
+      unlock: "Unlock",
+      logs: "Logs",
+      rewards: "Rewards",
+      settings: "Settings",
+      logout: "Logout",
+      navigation: "Navigation",
+    },
+  };
+  
+  $: lang = translations[currentLang];
+  
+  // Menu Items (from original)
+  $: menuItems = [
+    {
+      id: "list",
+      path: "/organizer/events",
+      label: lang.events,
+      svg: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01",
+    },
+    { 
+      id: "create", 
+      path: "/organizer/create-event",
+      label: lang.createEvent, 
+      svg: "M12 4v16m8-8H4" 
+    },
+    {
+      id: "verify-code",
+      path: "/organizer/verify-code",
+      label: lang.verifyCode,
+      svg: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+    },
+    {
+      id: "verify-proof",
+      path: "/organizer/verify-proof",
+      label: lang.verifyProof,
+      svg: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
+    },
+    {
+      id: "unlock",
+      path: "/organizer/unlock",
+      label: lang.unlock,
+      svg: "M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z",
+    },
+    {
+      id: "log",
+      path: "/organizer/logs",
+      label: lang.logs,
+      svg: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z",
+    },
+    {
+      id: "reward",
+      path: "/organizer/rewards",
+      label: lang.rewards,
+      svg: "M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V6a2 2 0 10-2 2h2zm0 0h4l-4 4-4-4h4z",
+    },
+    {
+      id: "settings",
+      path: "/organizer/settings",
+      label: lang.settings,
+      svg: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z",
+    },
   ];
   
-  // ==========================================
-  // 🌐 STATE & REACTIVE VARIABLES
-  // ==========================================
-  
-  // Determine current active menu based on URL
+  // State
   $: currentPath = $page.url.pathname;
-  $: activeMenuId = menuItems.find(item => 
-    currentPath.startsWith(item.path)
-  )?.id || 'events';
+  $: currentView = menuItems.find(item => currentPath.startsWith(item.path))?.id || 'list';
   
-  // Mobile menu state
   let isMobileMenuOpen = false;
-  
-  // Token timer
+  let timeLeft = 3600; // 1 hour in seconds
   let timerInterval: any;
   
-  // ==========================================
-  // 🔧 FUNCTIONS
-  // ==========================================
-  
-  /**
-   * Toggle language between Thai and English
-   */
-  function toggleLanguage() {
-    appState.update(state => ({
-      ...state,
-      currentLang: state.currentLang === 'th' ? 'en' : 'th'
-    }));
-    
-    // Save to localStorage
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('app_language', $appState.currentLang);
-    }
-  }
-  
-  /**
-   * Handle logout - clear all data and redirect to login
-   */
-  async function handleLogout() {
-    // Clear all stores
-    auth.logout();
-    
-    // Clear all storage (but keep language)
-    if (typeof localStorage !== 'undefined') {
-      const lang = localStorage.getItem('app_language');
-      localStorage.clear();
-      sessionStorage.clear();
-      if (lang) localStorage.setItem('app_language', lang);
-    }
-    
-    // Redirect to login
-    goto('/auth/login');
-  }
-  
-  /**
-   * Format time from seconds to MM:SS
-   */
   function formatTime(seconds: number): string {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
   
-  /**
-   * Navigate to a menu item
-   */
-  function navigateTo(path: string) {
+  function selectView(itemId: string) {
     isMobileMenuOpen = false;
-    goto(path);
-  }
-  
-  /**
-   * Close mobile menu when clicking outside
-   */
-  function handleClickOutside(event: MouseEvent) {
-    if (isMobileMenuOpen) {
-      const target = event.target as HTMLElement;
-      if (!target.closest('.mobile-menu') && !target.closest('.mobile-menu-btn')) {
-        isMobileMenuOpen = false;
-      }
+    const item = menuItems.find(m => m.id === itemId);
+    if (item) {
+      goto(item.path);
     }
   }
   
-  // ==========================================
-  // 🔄 LIFECYCLE
-  // ==========================================
+  async function handleLogout() {
+    if (typeof localStorage !== "undefined") {
+      const lang = localStorage.getItem("app_language");
+      localStorage.clear();
+      sessionStorage.clear();
+      if (lang) localStorage.setItem("app_language", lang);
+    }
+    goto('/auth/login');
+  }
   
   onMount(() => {
-    // Start token countdown timer
+    // Auth Check
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+      goto('/auth/login');
+    }
+    
+    // Start timer
     timerInterval = setInterval(() => {
-      auth.update(state => ({
-        ...state,
-        timeLeft: Math.max(0, state.timeLeft - 1)
-      }));
-      
-      // Auto logout when timer reaches 0
-      if ($auth.timeLeft <= 0) {
+      timeLeft = Math.max(0, timeLeft - 1);
+      if (timeLeft <= 0) {
         handleLogout();
       }
     }, 1000);
-    
-    // Add click listener for mobile menu
-    if (typeof window !== 'undefined') {
-      window.addEventListener('click', handleClickOutside);
-    }
   });
   
   onDestroy(() => {
-    // Clear timer
     if (timerInterval) {
       clearInterval(timerInterval);
-    }
-    
-    // Remove click listener
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('click', handleClickOutside);
     }
   });
 </script>
@@ -185,566 +168,532 @@
 <svelte:head>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
-    rel="stylesheet"
-  />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 </svelte:head>
 
 <div class="app-container">
-  <!-- ==========================================
-       HEADER BAR
-       ========================================== -->
+  <!-- HEADER -->
   <header class="header-bar">
     <div class="header-inner">
-      <!-- Brand -->
+      <!-- BRAND -->
       <div class="brand">
-        <div class="logo-container">
-          <!-- Logo SVG -->
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M13 10V3L4 14h7v7l9-11h-7z"
-            />
-          </svg>
-        </div>
-        <span class="brand-name">{t('organizer')}</span>
+        <div class="logo-container"></div>
+        <span class="brand-name">{lang.organizer}</span>
       </div>
 
-      <!-- Mobile Menu Toggle -->
-      <button
-        class="mobile-menu-btn mobile-only"
-        on:click={() => (isMobileMenuOpen = !isMobileMenuOpen)}
-        aria-label="Toggle menu"
-      >
-        <svg
-          class="menu-icon"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          {#if isMobileMenuOpen}
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M6 18L18 6M6 6l12 12"
-            />
-          {:else}
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M4 6h16M4 12h16M4 18h16"
-            />
-          {/if}
-        </svg>
-      </button>
-
-      <!-- Desktop Navigation -->
+      <!-- DESKTOP NAV -->
       <nav class="nav-menu desktop-only">
         {#each menuItems as item}
           <button
             class="menu-btn"
-            class:active={activeMenuId === item.id}
-            on:click={() => navigateTo(item.path)}
+            class:active={currentView === item.id}
+            on:click={() => selectView(item.id)}
           >
-            <svg
-              class="menu-icon"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d={item.icon}
-              />
+            <svg class="line-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={item.svg}></path>
             </svg>
-            <span class="menu-label">{item.label[$appState.currentLang]}</span>
+            <span class="btn-label">{item.label}</span>
           </button>
         {/each}
       </nav>
 
-      <!-- User Zone -->
+      <!-- USER ZONE -->
       <div class="user-zone">
         <!-- Language Toggle -->
         <button
           class="lang-toggle-btn"
           on:click={toggleLanguage}
-          title={$appState.currentLang === 'th'
-            ? 'Switch to English'
-            : 'เปลี่ยนเป็นภาษาไทย'}
+          title={currentLang === "th" ? "Switch to English" : "เปลี่ยนเป็นภาษาไทย"}
           aria-label="Toggle language"
         >
-          <span class="lang-option" class:active={$appState.currentLang === 'th'}>TH</span>
+          <span class="lang-option" class:active={currentLang === "th"}>TH</span>
           <span class="lang-divider">/</span>
-          <span class="lang-option" class:active={$appState.currentLang === 'en'}>EN</span>
+          <span class="lang-option" class:active={currentLang === "en"}>EN</span>
         </button>
 
-        <!-- Token Timer -->
-        <div class="token-timer" class:warning={$auth.timeLeft < 60}>
-          <svg class="timer-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-          <span>{formatTime($auth.timeLeft)}</span>
+        <!-- Timer -->
+        <div class="token-timer" class:warning={timeLeft < 60}>
+          {formatTime(timeLeft)}
         </div>
 
-        <!-- Logout Button -->
-        <button
-          class="logout-btn desktop-only"
-          on:click={handleLogout}
-          aria-label="Logout"
-          title={t('logout')}
-        >
-          <svg class="logout-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-            />
+        <!-- Logout (Desktop) -->
+        <button class="logout-icon-btn desktop-only" on:click={handleLogout} aria-label="Logout">
+          <svg class="line-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
           </svg>
         </button>
+
+        <!-- Mobile Menu Button -->
+        <div class="mobile-controls mobile-only">
+          <button class="mobile-icon-btn" on:click={() => (isMobileMenuOpen = !isMobileMenuOpen)} aria-label="Open menu">
+            <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path>
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
   </header>
 
-  <!-- ==========================================
-       MOBILE MENU
-       ========================================== -->
+  <!-- MOBILE DRAWER -->
   {#if isMobileMenuOpen}
-    <div class="mobile-menu">
-      {#each menuItems as item}
-        <button
-          class="mobile-menu-item"
-          class:active={activeMenuId === item.id}
-          on:click={() => navigateTo(item.path)}
-        >
-          <svg class="menu-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d={item.icon}
-            />
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div class="mobile-overlay" on:click={() => (isMobileMenuOpen = false)}></div>
+    <div class="mobile-drawer">
+      <div class="drawer-header">
+        <span class="brand-name">{lang.navigation}</span>
+        <button class="close-btn" on:click={() => (isMobileMenuOpen = false)} aria-label="Close menu">&times;</button>
+      </div>
+      <div class="drawer-content">
+        <!-- Language Toggle in Mobile -->
+        <button class="drawer-item lang-drawer-item" on:click={toggleLanguage}>
+          <svg class="lang-icon-mobile" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
           </svg>
-          <span class="menu-label">{item.label[$appState.currentLang]}</span>
+          <span class="drawer-label">
+            <span class="mobile-lang-option" class:active={currentLang === "th"}>TH</span>
+            <span class="mobile-lang-divider">/</span>
+            <span class="mobile-lang-option" class:active={currentLang === "en"}>EN</span>
+          </span>
         </button>
-      {/each}
-      
-      <div class="mobile-menu-divider"></div>
-      
-      <button class="mobile-menu-item logout" on:click={handleLogout}>
-        <svg class="menu-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-          />
-        </svg>
-        <span class="menu-label">{t('logout')}</span>
-      </button>
+        <div class="drawer-divider"></div>
+        {#each menuItems as item}
+          <button class="drawer-item" class:active={currentView === item.id} on:click={() => selectView(item.id)}>
+            <svg class="line-icon fixed-size" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={item.svg}></path>
+            </svg>
+            <span class="drawer-label">{item.label}</span>
+          </button>
+        {/each}
+      </div>
+      <div class="drawer-footer">
+        <button class="drawer-item logout-special" on:click={handleLogout}>
+          <svg class="line-icon fixed-size" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+          </svg>
+          <span>{lang.logout}</span>
+        </button>
+      </div>
     </div>
   {/if}
 
-  <!-- ==========================================
-       MAIN CONTENT AREA
-       ========================================== -->
-  <main class="main-content">
+  <!-- MAIN CONTENT -->
+  <main class="page-content">
     <slot />
   </main>
 </div>
 
 <style>
-  /* ==========================================
-     GLOBAL VARIABLES
-     ========================================== */
+  /* ===== CSS VARIABLES (from original) ===== */
   :global(:root) {
-    --primary: #0f766e;
-    --primary-light: #14b8a6;
-    --primary-dark: #0d5c54;
-    --secondary: #1e293b;
-    --bg: #ffffff;
-    --bg-alt: #f8fafc;
-    --bg-hover: #f1f5f9;
-    --border: #e2e8f0;
-    --border-dark: #cbd5e1;
-    --text: #1e293b;
-    --text-muted: #64748b;
-    --text-light: #94a3b8;
-    --error: #dc2626;
-    --warning: #f59e0b;
-    --success: #10b981;
-    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
-    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1);
-  }
-
-  /* ==========================================
-     RESET & BASE STYLES
-     ========================================== */
-  :global(*) {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
+    --bg-deep: #0f172a;
+    --bar-dark: #1e293b;
+    --text-pure: #f8fafc;
+    --text-muted: #94a3b8;
+    --emerald-pri: #10b981;
+    --teal-sec: #14b8a6;
+    --nav-height: 70px;
   }
 
   :global(body) {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: var(--bg-alt);
-    color: var(--text);
-    line-height: 1.6;
-    font-size: 14px;
+    background-color: var(--bg-deep);
+    color: var(--text-pure);
+    font-family: "Inter", sans-serif;
+    margin: 0;
+    padding: 0;
   }
 
-  /* ==========================================
-     APP CONTAINER
-     ========================================== */
+  /* ===== APP CONTAINER ===== */
   .app-container {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
   }
 
-  /* ==========================================
-     HEADER BAR
-     ========================================== */
+  /* ===== HEADER ===== */
   .header-bar {
+    width: 100%;
+    height: var(--nav-height);
+    background-color: var(--bar-dark);
     position: fixed;
     top: 0;
     left: 0;
-    right: 0;
-    height: 64px;
-    background: var(--bg);
-    border-bottom: 1px solid var(--border);
-    z-index: 100;
-    box-shadow: var(--shadow-sm);
+    z-index: 1000;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
   }
 
   .header-inner {
-    max-width: 100%;
     height: 100%;
-    margin: 0 auto;
+    display: flex;
+    align-items: center;
     padding: 0 1.5rem;
-    display: flex;
-    align-items: center;
     justify-content: space-between;
-    gap: 2rem;
-  }
-
-  /* ==========================================
-     BRAND
-     ========================================== */
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    font-weight: 700;
-    font-size: 1.125rem;
-    color: var(--primary);
-    user-select: none;
-  }
-
-  .logo-container {
-    width: 40px;
-    height: 40px;
-    background: linear-gradient(135deg, var(--primary), var(--primary-light));
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: var(--shadow-md);
-  }
-
-  .logo-container svg {
-    width: 24px;
-    height: 24px;
-    color: white;
-  }
-
-  .brand-name {
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: var(--primary);
-  }
-
-  /* ==========================================
-     NAVIGATION MENU
-     ========================================== */
-  .nav-menu {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex: 1;
-  }
-
-  .menu-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    background: transparent;
-    border: none;
-    border-radius: 8px;
-    color: var(--text-muted);
-    font-size: 0.875rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    white-space: nowrap;
-  }
-
-  .menu-btn:hover {
-    background: var(--bg-hover);
-    color: var(--primary);
-  }
-
-  .menu-btn.active {
-    background: var(--primary);
-    color: white;
-    box-shadow: var(--shadow-md);
-  }
-
-  .menu-icon {
-    width: 18px;
-    height: 18px;
-    flex-shrink: 0;
-  }
-
-  .menu-label {
-    font-size: 0.875rem;
-    font-weight: 500;
-  }
-
-  /* ==========================================
-     USER ZONE
-     ========================================== */
-  .user-zone {
-    display: flex;
-    align-items: center;
     gap: 1rem;
   }
 
-  /* Language Toggle */
-  .lang-toggle-btn {
+  /* ===== BRAND ===== */
+  .brand {
     display: flex;
     align-items: center;
-    gap: 0.25rem;
-    padding: 0.5rem 0.75rem;
-    background: var(--bg-alt);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: all 0.2s ease;
+    gap: 10px;
+    flex-shrink: 0;
   }
 
-  .lang-toggle-btn:hover {
-    border-color: var(--primary);
-    background: var(--bg);
-  }
-
-  .lang-option {
-    color: var(--text-light);
-    transition: color 0.2s ease;
-  }
-
-  .lang-option.active {
-    color: var(--primary);
-  }
-
-  .lang-divider {
-    color: var(--border-dark);
-  }
-
-  /* Token Timer */
-  .token-timer {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
-    background: var(--bg-alt);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--text);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .token-timer.warning {
-    background: #fef3c7;
-    border-color: var(--warning);
-    color: var(--warning);
-    animation: pulse 1s ease-in-out infinite;
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.7; }
-  }
-
-  .timer-icon {
-    width: 16px;
-    height: 16px;
-  }
-
-  /* Logout Button */
-  .logout-btn {
+  .logo-container {
+    width: 45px;
+    height: 45px;
+    background: linear-gradient(135deg, var(--emerald-pri), var(--teal-sec));
+    border-radius: 12px;
+    overflow: hidden;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 40px;
-    height: 40px;
+    flex-shrink: 0;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 0 15px rgba(16, 185, 129, 0.3);
+  }
+
+  .brand-name {
+    font-weight: 800;
+    font-size: 1.5rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    background: linear-gradient(to right, #6ee7b7, #10b981);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    filter: drop-shadow(0 2px 10px rgba(16, 185, 129, 0.4));
+    white-space: nowrap;
+    cursor: default;
+  }
+
+  /* ===== NAVIGATION ===== */
+  .line-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    stroke-width: 2;
+  }
+
+  .fixed-size {
+    width: 22px;
+    height: 22px;
+  }
+
+  .nav-menu {
+    display: flex;
+    gap: 6px;
+    flex: 1;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .menu-btn {
     background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    border: 1px solid transparent;
+    padding: 8px 14px;
+    border-radius: 12px;
     color: var(--text-muted);
     cursor: pointer;
-    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    transition: all 0.2s;
   }
 
-  .logout-btn:hover {
-    background: #fee2e2;
-    border-color: var(--error);
-    color: var(--error);
+  .menu-btn.active {
+    color: var(--emerald-pri);
+    background: #141d2b;
+    border: 1px solid rgba(16, 185, 129, 0.2);
+    box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.5);
+    transform: translateY(1px) scale(0.97);
   }
 
-  .logout-icon {
-    width: 18px;
-    height: 18px;
+  .menu-btn:hover:not(.active) {
+    color: var(--text-pure);
+    background: rgba(255, 255, 255, 0.03);
   }
 
-  /* ==========================================
-     MOBILE MENU
-     ========================================== */
-  .mobile-menu-btn {
+  /* ===== USER ZONE ===== */
+  .user-zone {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .lang-toggle-btn {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 6px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    transition: all 0.2s;
+  }
+
+  .lang-toggle-btn:hover {
+    border-color: var(--emerald-pri);
+    background: rgba(16, 185, 129, 0.1);
+  }
+
+  .lang-option {
+    color: var(--text-muted);
+    transition: color 0.2s;
+  }
+
+  .lang-option.active {
+    color: var(--emerald-pri);
+  }
+
+  .lang-divider {
+    color: rgba(255, 255, 255, 0.2);
+  }
+
+  .token-timer {
+    padding: 6px 14px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--emerald-pri);
+    font-family: monospace;
+    font-weight: bold;
+    font-size: 0.85rem;
+  }
+
+  .token-timer.warning {
+    color: #ef4444;
+    border-color: rgba(239, 68, 68, 0.3);
+    background: rgba(239, 68, 68, 0.1);
+    animation: pulse 1s infinite;
+  }
+
+  .logout-icon-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    padding: 8px;
+    border-radius: 50%;
+    transition: all 0.3s ease;
+  }
+
+  .logout-icon-btn:hover {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    transform: scale(1.1);
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.3);
+  }
+
+  /* ===== MOBILE ===== */
+  .mobile-controls {
     display: none;
+    gap: 8px;
+    align-items: center;
   }
 
-  .mobile-menu {
-    display: none;
+  .mobile-icon-btn {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 8px;
+    border-radius: 10px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
-  /* ==========================================
-     MAIN CONTENT
-     ========================================== */
-  .main-content {
-    margin-top: 64px;
-    min-height: calc(100vh - 64px);
+  .mobile-icon-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: white;
+  }
+
+  .mobile-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 2000;
+    backdrop-filter: blur(5px);
+  }
+
+  .mobile-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 75vw;
+    max-width: 280px;
+    background: rgba(30, 41, 59, 0.98);
+    backdrop-filter: blur(10px);
+    z-index: 2001;
+    padding: 1.25rem;
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .drawer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 0.75rem;
+  }
+
+  .close-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 2rem;
+    cursor: pointer;
+    transition: color 0.2s;
+  }
+
+  .close-btn:hover {
+    color: var(--text-pure);
+  }
+
+  .drawer-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow-y: auto;
+  }
+
+  .drawer-item {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: 12px 14px;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.95rem;
+    transition: all 0.2s;
     width: 100%;
+    text-align: left;
   }
 
-  /* ==========================================
-     RESPONSIVE - MOBILE
-     ========================================== */
-  @media (max-width: 1024px) {
+  .drawer-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-pure);
+  }
+
+  .drawer-item.active {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--emerald-pri);
+    border-left: 3px solid var(--emerald-pri);
+  }
+
+  .lang-drawer-item {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 8px;
+  }
+
+  .mobile-lang-option {
+    color: var(--text-muted);
+  }
+
+  .mobile-lang-option.active {
+    color: var(--emerald-pri);
+  }
+
+  .mobile-lang-divider {
+    color: rgba(255, 255, 255, 0.2);
+    margin: 0 4px;
+  }
+
+  .drawer-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.08);
+    margin: 8px 0;
+  }
+
+  .drawer-footer {
+    margin-top: auto;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .logout-special {
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    justify-content: center;
+  }
+
+  .logout-special:hover {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: #ef4444;
+  }
+
+  /* ===== MAIN CONTENT ===== */
+  .page-content {
+    margin-top: var(--nav-height);
+    flex: 1;
+    width: 100%;
+    min-height: calc(100vh - var(--nav-height));
+  }
+
+  /* ===== RESPONSIVE ===== */
+  .desktop-only {
+    display: flex;
+  }
+
+  .mobile-only {
+    display: none;
+  }
+
+  @media (max-width: 900px) {
     .desktop-only {
-      display: none !important;
+      display: none;
     }
 
     .mobile-only {
       display: flex !important;
     }
 
-    .mobile-menu-btn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 40px;
-      height: 40px;
-      background: transparent;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      color: var(--text);
-      cursor: pointer;
-      transition: all 0.2s ease;
+    .mobile-controls.mobile-only {
+      display: flex !important;
     }
 
-    .mobile-menu-btn:hover {
-      background: var(--bg-hover);
-      border-color: var(--primary);
-      color: var(--primary);
-    }
-
-    .mobile-menu {
-      display: flex;
-      flex-direction: column;
-      position: fixed;
-      top: 64px;
-      left: 0;
-      right: 0;
-      background: var(--bg);
-      border-bottom: 1px solid var(--border);
-      box-shadow: var(--shadow-lg);
-      z-index: 99;
-      max-height: calc(100vh - 64px);
-      overflow-y: auto;
-    }
-
-    .mobile-menu-item {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      padding: 1rem 1.5rem;
-      background: transparent;
-      border: none;
-      border-bottom: 1px solid var(--border);
-      color: var(--text);
-      font-size: 1rem;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      text-align: left;
-    }
-
-    .mobile-menu-item:hover {
-      background: var(--bg-hover);
-    }
-
-    .mobile-menu-item.active {
-      background: var(--primary);
-      color: white;
-    }
-
-    .mobile-menu-item.logout {
-      color: var(--error);
-    }
-
-    .mobile-menu-item.logout:hover {
-      background: #fee2e2;
-    }
-
-    .mobile-menu-divider {
-      height: 8px;
-      background: var(--bg-alt);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .header-inner {
-      padding: 0 1rem;
+    .brand-name {
+      font-size: 1.2rem;
     }
   }
 
   @media (max-width: 640px) {
+    .header-inner {
+      padding: 0 1rem;
+    }
+
     .brand-name {
       font-size: 1rem;
     }
 
-    .token-timer span {
-      display: none;
+    .logo-container {
+      width: 40px;
+      height: 40px;
+    }
+  }
+
+  @keyframes pulse {
+    50% {
+      opacity: 0.5;
     }
   }
 </style>

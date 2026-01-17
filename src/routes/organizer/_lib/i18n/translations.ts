@@ -7,9 +7,9 @@ export const translations = {
     verifyCode: "ตรวจรหัส",
     verifyProof: "ตรวจสอบหลักฐาน",
     unlock: "ปลดล็อค",
-    unlockAccount: "ปลดล็อคบัญชี", // ← เพิ่ม
+    unlockAccount: "ปลดล็อคบัญชี",
     logs: "ประวัติ",
-    activityLogs: "ประวัติกิจกรรม", // ← เพิ่ม
+    activityLogs: "ประวัติกิจกรรม",
     rewards: "รางวัล",
     settings: "ตั้งค่า",
     logout: "ออกจากระบบ",
@@ -56,10 +56,10 @@ export const translations = {
     viewDetails: "ดูรายละเอียด",
 
     // Create/Edit Event - Tabs
-    generalInfo: "ข้อมูลทั่วไป", // ← เพิ่ม
-    eventType: "ประเภทกิจกรรม", // ← เพิ่ม
-    dateTime: "วันและเวลา", // ← เพิ่ม
-    rewardsTab: "รางวัล", // ← เพิ่ม
+    generalInfo: "ข้อมูลทั่วไป",
+    eventType: "ประเภทกิจกรรม",
+    dateTime: "วันและเวลา",
+    rewardsTab: "รางวัล",
 
     // Create/Edit Event
     createNewEvent: "สร้างกิจกรรมใหม่",
@@ -108,6 +108,35 @@ export const translations = {
     language: "ภาษา",
     thai: "ไทย",
     english: "English",
+
+    // ========================================
+    // 🆕 ADDED: Create Event - Missing Keys
+    // ========================================
+    
+    // Validation & Errors
+    fillAllFields: "กรุณากรอกข้อมูลให้ครบถ้วน",
+    invalidDateRangeMsg: "วันที่ไม่ถูกต้อง กรุณาตรวจสอบใหม่",
+    
+    // Date & Time Labels
+    dateAndTime: "วันที่และเวลา",
+    startDateLabel: "วันที่เริ่มต้น",
+    endDateLabel: "วันที่สิ้นสุด",
+    startTimeLabel: "เวลาเริ่ม",
+    endTimeLabel: "เวลาสิ้นสุด",
+    capacityLabel: "จำนวนที่นั่ง",
+    distanceLabel: "ระยะทาง (กม.)",
+    
+    // Holidays & Exclusions
+    holidaysAndExclusions: "วันหยุดและข้อยกเว้น",
+    excludeWeekends: "ไม่นับวันหยุดสุดสัปดาห์",
+    noHolidaysOption: "ไม่มีวันหยุด",
+    
+    // Rewards
+    rewardsDistribution: "การแจกรางวัล",
+    removeTier: "ลบระดับ",
+    
+    // Check-in
+    checkinTimes: "ครั้ง",
   },
   
   en: {
@@ -118,9 +147,9 @@ export const translations = {
     verifyCode: "Verify Code",
     verifyProof: "Verify Proof",
     unlock: "Unlock",
-    unlockAccount: "Unlock Account", // ← เพิ่ม
+    unlockAccount: "Unlock Account",
     logs: "Logs",
-    activityLogs: "Activity Logs", // ← เพิ่ม
+    activityLogs: "Activity Logs",
     rewards: "Rewards",
     settings: "Settings",
     logout: "Logout",
@@ -167,10 +196,10 @@ export const translations = {
     viewDetails: "View Details",
 
     // Create/Edit Event - Tabs
-    generalInfo: "General Info", // ← เพิ่ม
-    eventType: "Event Type", // ← เพิ่ม
-    dateTime: "Date & Time", // ← เพิ่ม
-    rewardsTab: "Rewards", // ← เพิ่ม
+    generalInfo: "General Info",
+    eventType: "Event Type",
+    dateTime: "Date & Time",
+    rewardsTab: "Rewards",
 
     // Create/Edit Event
     createNewEvent: "Create New Event",
@@ -219,6 +248,35 @@ export const translations = {
     language: "Language",
     thai: "ไทย",
     english: "English",
+
+    // ========================================
+    // 🆕 ADDED: Create Event - Missing Keys
+    // ========================================
+    
+    // Validation & Errors
+    fillAllFields: "Please fill all required fields",
+    invalidDateRangeMsg: "Invalid date range. Please check again",
+    
+    // Date & Time Labels
+    dateAndTime: "Date & Time",
+    startDateLabel: "Start Date",
+    endDateLabel: "End Date",
+    startTimeLabel: "Start Time",
+    endTimeLabel: "End Time",
+    capacityLabel: "Capacity",
+    distanceLabel: "Distance (km)",
+    
+    // Holidays & Exclusions
+    holidaysAndExclusions: "Holidays & Exclusions",
+    excludeWeekends: "Exclude Weekends",
+    noHolidaysOption: "No Holidays",
+    
+    // Rewards
+    rewardsDistribution: "Rewards Distribution",
+    removeTier: "Remove Tier",
+    
+    // Check-in
+    checkinTimes: "times",
   }
 };
 

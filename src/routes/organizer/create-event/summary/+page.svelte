@@ -1,153 +1,531 @@
-=== ./summary/+page.svelte ===
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import { eventForm } from '../../_lib/stores/eventForm';
   import { appState } from '../../_lib/stores/appState';
-  import { goto } from '$app/navigation';
   import { t } from '../../_lib/i18n';
-  import api from '../../_lib/api/client';
-  import { endpoints } from '../../_lib/api/endpoints';
-  import { createUTCISOFromBangkok } from '../../_lib/utils/dateTime';
-  import SuccessAlert from '../../_lib/components/SuccessAlert.svelte';
-  import ErrorMessage from '../../_lib/components/ErrorMessage.svelte';
+  import { onMount } from 'svelte';
   
   $: lang = $appState.currentLang;
+  $: storeData = $eventForm as any;
+  $: editingEventId = storeData?.editingEventId;
+  
+  let formData = {
+    imagePreview: null as string | null,
+    title: '',
+    description: '',
+    location: '',
+    eventType: 'single_day',
+    maxCheckinsPerUser: 1,
+    sDay: '',
+    sMonth: '',
+    sYear: '',
+    eDay: '',
+    eMonth: '',
+    eYear: '',
+    startTime: '',
+    endTime: '',
+    totalSlots: null as number | null,
+    distanceKm: null as number | null,
+    holidays: [] as string[],
+    holidayMode: null as string | null,
+    totalRewards: null as number | null,
+    rewards: [] as any[],
+    isPublic: true,
+    isActive: true
+  };
   
   let isSubmitting = false;
-  let showSuccess = false;
-  let errorMessage = '';
+  let error = '';
   
-  async function handlePublish() {
-    if (isSubmitting) return;
-    
+  onMount(() => {
+    formData = { ...$eventForm } as any;
+  });
+  
+  function formatDate(day: string, month: string, year: string) {
+    if (!day || !month || !year) return '';
+    const monthNames = lang === 'th' 
+      ? ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
+      : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthIndex = parseInt(month) - 1;
+    return `${day} ${monthNames[monthIndex]} ${year}`;
+  }
+  
+  function getEventTypeLabel(type: string) {
+    const types: Record<string, { th: string; en: string }> = {
+      single_day: { th: 'กิจกรรมวันเดียว', en: 'Single Day Event' },
+      multi_day: { th: 'กิจกรรมหลายวัน', en: 'Multi-Day Event' }
+    };
+    return types[type]?.[lang] || type;
+  }
+  
+  function getHolidayModeLabel(mode: string | null) {
+    if (!mode) return lang === 'th' ? 'ไม่มี' : 'None';
+    const modes: Record<string, { th: string; en: string }> = {
+      weekends: { th: 'ไม่นับวันหยุดสุดสัปดาห์', en: 'Exclude Weekends' },
+      none: { th: 'ไม่มีวันหยุด', en: 'No Holidays' },
+      specific: { th: `${formData.holidays.length} วันที่เลือก`, en: `${formData.holidays.length} specific dates` }
+    };
+    return modes[mode]?.[lang] || mode;
+  }
+  
+  async function handleSubmit() {
     isSubmitting = true;
-    errorMessage = '';
+    error = '';
     
     try {
-      const formData = new FormData();
+      // Create FormData for file uploads
+      const formDataToSend = new FormData();
       
-      formData.append('title', $eventForm.title);
-      formData.append('description', $eventForm.description);
-      formData.append('location', $eventForm.location);
-      formData.append('eventType', $eventForm.eventType);
-      formData.append('totalSlots', String($eventForm.totalSlots));
+      // Add all fields
+      Object.entries(formData).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+          if (Array.isArray(value)) {
+            formDataToSend.append(key, JSON.stringify(value));
+          } else if (typeof value === 'object' && key !== 'imageFile') {
+            formDataToSend.append(key, JSON.stringify(value));
+          } else if (key !== 'imagePreview') {
+            formDataToSend.append(key, String(value));
+          }
+        }
+      });
       
-      if ($eventForm.distanceKm) {
-        formData.append('distanceKm', String($eventForm.distanceKm));
+      // Submit to API
+      const response = await fetch('/api/organizer/events', {
+        method: editingEventId ? 'PUT' : 'POST',
+        body: formDataToSend
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to submit event');
       }
       
-      const startDateStr = `${$eventForm.startDate.year}-${$eventForm.startDate.month.padStart(2, '0')}-${$eventForm.startDate.day.padStart(2, '0')}`;
-      const endDateStr = `${$eventForm.endDate.year}-${$eventForm.endDate.month.padStart(2, '0')}-${$eventForm.endDate.day.padStart(2, '0')}`;
-      
-      formData.append('startDate', createUTCISOFromBangkok(startDateStr, $eventForm.startTime));
-      formData.append('endDate', createUTCISOFromBangkok(endDateStr, $eventForm.endTime));
-      
-      if ($eventForm.imageFile) {
-        formData.append('image', $eventForm.imageFile);
-      }
-      
-      formData.append('rewards', JSON.stringify($eventForm.rewards));
-      formData.append('holidays', JSON.stringify($eventForm.holidays));
-      formData.append('holidayType', $eventForm.holidayType);
-      
-      if ($eventForm.editingEventId) {
-        await api.put(endpoints.events.update($eventForm.editingEventId), formData);
-      } else {
-        await api.post(endpoints.events.create, formData);
-      }
-      
-      showSuccess = true;
+      // Success - redirect to events list
       eventForm.reset();
+      goto('/organizer/events');
       
-      setTimeout(() => {
-        goto('/organizer/events');
-      }, 1500);
-      
-    } catch (error: any) {
-      errorMessage = error.response?.data?.message || 'Failed to save event';
-      console.error('Error saving event:', error);
-    } finally {
+    } catch (err: any) {
+      error = err.message || 'An error occurred';
       isSubmitting = false;
     }
   }
+  
+  function handleBack() {
+    goto('/organizer/create-event/rewards');
+  }
+  
+  function handleEdit(section: string) {
+    goto(`/organizer/create-event/${section}`);
+  }
 </script>
 
-<div class="form-section">
-  <h3 class="section-title">{t('summary')}</h3>
-  
-  {#if showSuccess}
-    <SuccessAlert 
-      message={lang === 'th' ? 'บันทึกกิจกรรมสำเร็จ' : 'Event saved successfully'}
-      autoDismiss={true}
-    />
-  {/if}
-  
-  {#if errorMessage}
-    <ErrorMessage message={errorMessage} onDismiss={() => errorMessage = ''} />
-  {/if}
-  
-  <div class="summary-section">
-    <h4>{lang === 'th' ? 'ข้อมูลพื้นฐาน' : 'Basic Information'}</h4>
-    <dl>
-      <dt>{lang === 'th' ? 'ชื่อกิจกรรม' : 'Event Name'}</dt>
-      <dd>{$eventForm.title}</dd>
-      <dt>{lang === 'th' ? 'สถานที่' : 'Location'}</dt>
-      <dd>{$eventForm.location}</dd>
-      <dt>{lang === 'th' ? 'ประเภท' : 'Type'}</dt>
-      <dd>{$eventForm.eventType === 'single_day' ? (lang === 'th' ? 'วันเดียว' : 'Single Day') : (lang === 'th' ? 'หลายวัน' : 'Multi Day')}</dd>
-    </dl>
-  </div>
-  
-  <div class="summary-section">
-    <h4>{lang === 'th' ? 'จำนวนและระยะทาง' : 'Capacity & Distance'}</h4>
-    <dl>
-      <dt>{lang === 'th' ? 'จำนวนที่นั่ง' : 'Total Capacity'}</dt>
-      <dd>{$eventForm.totalSlots}</dd>
-      <dt>{lang === 'th' ? 'ระยะทาง' : 'Distance'}</dt>
-      <dd>{$eventForm.distanceKm ? `${$eventForm.distanceKm} km` : '-'}</dd>
-    </dl>
-  </div>
-  
-  <div class="summary-section">
-    <h4>{lang === 'th' ? 'รางวัล' : 'Rewards'}</h4>
-    <div class="rewards-summary">
-      {#each $eventForm.rewards as reward, i}
-        <div class="reward-item">
-          <span class="tier">Tier {i + 1}</span>
-          <span class="name">{reward.name}</span>
-          <span class="req">{reward.requirement} {lang === 'th' ? 'รอบ' : 'rounds'}</span>
-          <span class="quota">{reward.quota || (lang === 'th' ? 'ไม่จำกัด' : 'Unlimited')}</span>
-        </div>
-      {/each}
+<div class="ce-grid-layout">
+  <!-- Summary Header -->
+  <div class="ce-summary-header">
+    <div class="ce-summary-icon">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+    </div>
+    <div>
+      <h3 class="ce-summary-title">{lang === 'th' ? 'ตรวจสอบข้อมูลก่อนเผยแพร่' : 'Review Before Publishing'}</h3>
+      <p class="ce-summary-desc">{lang === 'th' ? 'กรุณาตรวจสอบข้อมูลให้ถูกต้องก่อนเผยแพร่กิจกรรม' : 'Please verify all information before publishing your event'}</p>
     </div>
   </div>
-  
-  <div class="form-actions">
-    <button class="btn-secondary" on:click={() => goto('/organizer/create-event/rewards')} type="button" disabled={isSubmitting}>
+
+  <!-- General Info Card -->
+  <div class="ce-card ce-summary-card">
+    <div class="ce-card-head">
+      <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
+        <svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+        </svg>
+        <span>{lang === 'th' ? 'ข้อมูลทั่วไป' : 'General Information'}</span>
+      </div>
+      <button type="button" class="ce-btn-edit" on:click={() => handleEdit('general')}>
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+        </svg>
+        {t('edit')}
+      </button>
+    </div>
+
+    {#if formData.imagePreview}
+      <div class="ce-summary-image">
+        <img src={formData.imagePreview} alt="Event banner" />
+      </div>
+    {/if}
+
+    <div class="ce-summary-grid">
+      <div class="ce-summary-item">
+        <span class="ce-summary-label">{t('eventName')}</span>
+        <span class="ce-summary-value">{formData.title || '-'}</span>
+      </div>
+
+      <div class="ce-summary-item">
+        <span class="ce-summary-label">{t('eventType')}</span>
+        <span class="ce-summary-badge">{getEventTypeLabel(formData.eventType)}</span>
+      </div>
+
+      <div class="ce-summary-item full-width">
+        <span class="ce-summary-label">{t('description')}</span>
+        <span class="ce-summary-value">{formData.description || '-'}</span>
+      </div>
+
+      <div class="ce-summary-item full-width">
+        <span class="ce-summary-label">{t('location')}</span>
+        <span class="ce-summary-value">{formData.location || '-'}</span>
+      </div>
+
+      {#if formData.eventType === 'multi_day'}
+        <div class="ce-summary-item">
+          <span class="ce-summary-label">{t('maxCheckinsPerUser')}</span>
+          <span class="ce-summary-value">{formData.maxCheckinsPerUser} {t('checkinTimes')}</span>
+        </div>
+      {/if}
+    </div>
+  </div>
+
+  <!-- Date & Capacity Card -->
+  <div class="ce-card ce-summary-card">
+    <div class="ce-card-head">
+      <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
+        <svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+        </svg>
+        <span>{lang === 'th' ? 'วันเวลาและจำนวน' : 'Date, Time & Capacity'}</span>
+      </div>
+      <button type="button" class="ce-btn-edit" on:click={() => handleEdit('capacity')}>
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+        </svg>
+        {t('edit')}
+      </button>
+    </div>
+
+    <div class="ce-summary-grid">
+      <div class="ce-summary-item">
+        <span class="ce-summary-label">{t('startDateLabel')}</span>
+        <span class="ce-summary-value">{formatDate(formData.sDay, formData.sMonth, formData.sYear)}</span>
+      </div>
+
+      <div class="ce-summary-item">
+        <span class="ce-summary-label">{t('endDateLabel')}</span>
+        <span class="ce-summary-value">{formatDate(formData.eDay, formData.eMonth, formData.eYear)}</span>
+      </div>
+
+      <div class="ce-summary-item">
+        <span class="ce-summary-label">{t('startTimeLabel')}</span>
+        <span class="ce-summary-value">{formData.startTime || '-'}</span>
+      </div>
+
+      <div class="ce-summary-item">
+        <span class="ce-summary-label">{t('endTimeLabel')}</span>
+        <span class="ce-summary-value">{formData.endTime || '-'}</span>
+      </div>
+
+      <div class="ce-summary-item">
+        <span class="ce-summary-label">{t('capacityLabel')}</span>
+        <span class="ce-summary-value-highlight">{formData.totalSlots || '-'} {lang === 'th' ? 'ที่นั่ง' : 'slots'}</span>
+      </div>
+
+      <div class="ce-summary-item">
+        <span class="ce-summary-label">{t('distanceLabel')}</span>
+        <span class="ce-summary-value">{formData.distanceKm || 0} km</span>
+      </div>
+
+      <div class="ce-summary-item full-width">
+        <span class="ce-summary-label">{t('holidaysAndExclusions')}</span>
+        <span class="ce-summary-value">{getHolidayModeLabel(formData.holidayMode)}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rewards Card -->
+  <div class="ce-card ce-summary-card">
+    <div class="ce-card-head">
+      <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
+        <svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"></path>
+        </svg>
+        <span>{lang === 'th' ? 'รางวัล' : 'Rewards'}</span>
+      </div>
+      <button type="button" class="ce-btn-edit" on:click={() => handleEdit('rewards')}>
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+        </svg>
+        {t('edit')}
+      </button>
+    </div>
+
+    <div class="ce-summary-item" style="margin-bottom: 16px;">
+      <span class="ce-summary-label">{lang === 'th' ? 'จำนวนของรางวัลทั้งหมด' : 'Total Reward Items'}</span>
+      <span class="ce-summary-value-highlight">{formData.totalRewards || 0} {lang === 'th' ? 'ชิ้น' : 'items'}</span>
+    </div>
+
+    {#if formData.rewards.length > 0}
+      <div class="ce-rewards-grid">
+        {#each formData.rewards.sort((a: any, b: any) => (a.requirement || 0) - (b.requirement || 0)) as reward}
+          <div class="ce-reward-summary-card">
+            <div class="ce-reward-rounds">{reward.requirement || 0} {lang === 'th' ? 'รอบ' : 'rounds'}</div>
+            <div class="ce-reward-name">{reward.name || '-'}</div>
+          </div>
+        {/each}
+      </div>
+    {:else}
+      <div class="ce-empty-state">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+        </svg>
+        <span>{lang === 'th' ? 'ยังไม่มีรางวัล' : 'No rewards configured'}</span>
+      </div>
+    {/if}
+  </div>
+
+  <!-- Error Display -->
+  {#if error}
+    <div class="ce-error-msg">
+      ⚠️ {error}
+    </div>
+  {/if}
+
+  <!-- Navigation Buttons -->
+  <div class="ce-nav-buttons">
+    <button type="button" class="ce-btn-cancel" on:click={handleBack} disabled={isSubmitting}>
       <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
       </svg>
       {t('back')}
     </button>
-    <button class="btn-primary" on:click={handlePublish} type="button" disabled={isSubmitting}>
-      {isSubmitting ? (lang === 'th' ? 'กำลังบันทึก...' : 'Saving...') : t('publish')}
+    <button type="button" class="ce-btn-save ce-btn-publish" on:click={handleSubmit} disabled={isSubmitting}>
+      {#if isSubmitting}
+        <div class="btn-loader"></div>
+      {:else}
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+        </svg>
+      {/if}
+      {editingEventId ? (lang === 'th' ? 'บันทึกการแก้ไข' : 'Save Changes') : (lang === 'th' ? 'เผยแพร่กิจกรรม' : 'Publish Event')}
     </button>
   </div>
 </div>
 
 <style>
-  .form-section { background: white; border-radius: 12px; padding: 2rem; box-shadow: var(--shadow-sm); }
-  .section-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 2rem; }
-  .summary-section { margin-bottom: 2rem; padding-bottom: 2rem; border-bottom: 1px solid var(--border); }
-  .summary-section:last-of-type { border-bottom: none; }
-  .summary-section h4 { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; }
-  .summary-section dl { display: grid; grid-template-columns: 150px 1fr; gap: 0.75rem 1rem; }
-  .summary-section dt { font-weight: 600; color: var(--text-muted); }
-  .summary-section dd { margin: 0; }
-  .rewards-summary { display: flex; flex-direction: column; gap: 0.5rem; }
-  .reward-item { display: grid; grid-template-columns: 80px 1fr 120px 120px; gap: 1rem; padding: 0.75rem; background: var(--bg-alt); border-radius: 6px; }
-  .form-actions { display: flex; justify-content: space-between; gap: 1rem; margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--border); }
-  .btn-secondary, .btn-primary { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.5rem; border-radius: 8px; font-weight: 600; cursor: pointer; }
-  .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
-  .btn-primary { background: var(--primary); color: white; border: none; }
-  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+ 
+  
+  .ce-summary-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 24px;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 95, 70, 0.05));
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 20px;
+    margin-bottom: 24px;
+  }
+
+  .ce-summary-icon {
+    width: 56px;
+    height: 56px;
+    background: rgba(16, 185, 129, 0.15);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .ce-summary-icon svg {
+    width: 28px;
+    height: 28px;
+    color: #10b981;
+  }
+
+  .ce-summary-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #10b981;
+    margin: 0 0 4px 0;
+  }
+
+  .ce-summary-desc {
+    font-size: 0.9rem;
+    color: #6ee7b7;
+    margin: 0;
+  }
+
+  .ce-summary-card {
+    position: relative;
+  }
+
+  .ce-btn-edit {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 10px;
+    color: #60a5fa;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .ce-btn-edit:hover {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: #3b82f6;
+  }
+
+  .ce-btn-edit svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .ce-summary-image {
+    width: 100%;
+    height: 200px;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+
+  .ce-summary-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .ce-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+
+  .ce-summary-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .ce-summary-item.full-width {
+    grid-column: 1 / -1;
+  }
+
+  .ce-summary-label {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .ce-summary-value {
+    font-size: 0.95rem;
+    color: #e2e8f0;
+    font-weight: 500;
+  }
+
+  .ce-summary-value-highlight {
+    font-size: 1.1rem;
+    color: #10b981;
+    font-weight: 700;
+  }
+
+  .ce-summary-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 8px;
+    color: #10b981;
+    font-size: 0.85rem;
+    font-weight: 600;
+    width: fit-content;
+  }
+
+  .ce-rewards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+  }
+
+  .ce-reward-summary-card {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(234, 88, 12, 0.05));
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+  }
+
+  .ce-reward-rounds {
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    display: inline-block;
+    margin-bottom: 8px;
+  }
+
+  .ce-reward-name {
+    color: #f0fdf4;
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+
+  .ce-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 40px;
+    color: #64748b;
+  }
+
+  .ce-empty-state svg {
+    width: 48px;
+    height: 48px;
+  }
+
+  .ce-btn-publish {
+    background: linear-gradient(135deg, #10b981, #059669);
+    box-shadow: 0 8px 16px rgba(16, 185, 129, 0.3);
+  }
+
+  .ce-btn-publish:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 24px rgba(16, 185, 129, 0.4);
+  }
+
+  .ce-btn-publish:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .btn-loader {
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  @media (max-width: 768px) {
+    .ce-summary-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .ce-rewards-grid {
+      grid-template-columns: 1fr;
+    }
+  }
 </style>

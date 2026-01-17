@@ -28,6 +28,8 @@
     "@smui/common": "^7.0.0",
     "@smui/layout-grid": "^7.0.0",
     "axios": "^1.13.2",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.0.0",
     "jsqr": "^1.4.0",
     "sass": "^1.94.2",
     "svelte-material-ui": "^8.0.3",

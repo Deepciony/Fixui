@@ -1,229 +1,1328 @@
-=== verify-code/./+page.svelte ===
 <script lang="ts">
-  import { appState } from '../_lib/stores/appState';
-  import api from '../_lib/api/client';
-  import { endpoints } from '../_lib/api/endpoints';
-  import { t } from '../_lib/i18n';
-  import ErrorMessage from '../_lib/components/ErrorMessage.svelte';
-  import SuccessAlert from '../_lib/components/SuccessAlert.svelte';
-  import CodeInput from './_components/CodeInput.svelte';
-  import QRScanner from './_components/QRScanner.svelte';
-  import ParticipantInfo from './_components/ParticipantInfo.svelte';
-  import AutoToggle from './_components/AutoToggle.svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import axios from 'axios';
+  import jsQR from 'jsqr';
   
-  $: lang = $appState.currentLang;
+  // API Configuration
+  const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
   
-  let mode: 'check-in' | 'check-out' = 'check-in';
-  let inputMode: 'manual' | 'qr' = 'manual';
-  let code = '';
+  const api = axios.create({
+    baseURL: API_BASE_URL,
+    timeout: 30000,
+  });
+  
+  api.interceptors.request.use((config) => {
+    const token = localStorage.getItem('access_token');
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+    return config;
+  });
+  
+  // Language
+  type Language = "th" | "en";
+  let currentLang: Language = "th";
+  
+  if (typeof localStorage !== "undefined") {
+    const saved = localStorage.getItem("app_language");
+    if (saved === "th" || saved === "en") currentLang = saved;
+  }
+  
+  const translations = {
+    th: {
+      checkIn: "เช็คอิน",
+      checkOut: "เช็คเอาท์",
+      participantCheckIn: "เช็คอินผู้เข้าร่วม",
+      participantCheckOut: "เช็คเอาท์ผู้เข้าร่วม",
+      verifyParticipantCode: "ตรวจสอบรหัสผู้เข้าร่วมงาน",
+      verifyParticipantCodeOut: "ตรวจสอบรหัสเช็คเอาท์",
+      pinCode: "รหัส PIN",
+      scanQR: "สแกน QR",
+      enterDigitCode: "กรอกรหัส 6 หลัก",
+      autoCheckInEnabled: "Auto Check-in เปิดอยู่",
+      autoCheckOutEnabled: "Auto Check-out เปิดอยู่",
+      pressCheckIn: "กดปุ่มเพื่อเช็คอิน",
+      pressCheckOut: "กดปุ่มเพื่อเช็คเอาท์",
+      checkOutSuccess: "เช็คเอาท์สำเร็จ",
+      invalidCode: "รหัสไม่ถูกต้อง",
+      alreadyCheckedIn: "เช็คอินแล้ว",
+      notCheckedIn: "ยังไม่ได้เช็คอิน",
+      eventNotFound: "ไม่พบกิจกรรม",
+      cameraAccessDenied: "ไม่สามารถเข้าถึงกล้องได้",
+      pointCameraAtQR: "เล็งกล้องไปที่ QR code ของผู้เข้าร่วม",
+    },
+    en: {
+      checkIn: "Check In",
+      checkOut: "Check Out",
+      participantCheckIn: "Participant Check-In",
+      participantCheckOut: "Participant Check-Out",
+      verifyParticipantCode: "Verify participant code",
+      verifyParticipantCodeOut: "Verify check-out code",
+      pinCode: "PIN Code",
+      scanQR: "Scan QR",
+      enterDigitCode: "Enter 6-digit code",
+      autoCheckInEnabled: "Auto Check-in enabled",
+      autoCheckOutEnabled: "Auto Check-out enabled",
+      pressCheckIn: "Press button to check-in",
+      pressCheckOut: "Press button to check-out",
+      checkOutSuccess: "Check-out successful",
+      invalidCode: "Invalid code",
+      alreadyCheckedIn: "Already checked in",
+      notCheckedIn: "Not checked in yet",
+      eventNotFound: "Event not found",
+      cameraAccessDenied: "Camera access denied",
+      pointCameraAtQR: "Point camera at participant's QR code",
+    },
+  };
+  
+  $: lang = translations[currentLang];
+  
+  // State
+  let verifyActionMode: "checkin" | "checkout" = "checkin";
+  let verifyMode: "pin" | "qr" = "pin";
+  let autoCheckIn = false;
   let isVerifying = false;
-  let participant: any = null;
-  let successMessage = '';
-  let errorMessage = '';
-  let autoMode = false;
-  let autoTimer: any = null;
+  let lastVerifySuccess = false;
+  let lastCheckOutSuccess = false;
+  let lastParticipantName = "";
+  let verifyErrorMessage = "";
+  let verifyErrorIndex: number | null = null;
   
-  async function verifyCode(codeValue: string) {
-    if (!codeValue || isVerifying) return;
+  // PIN Mode
+  let pins = ["", "", "", "", "", ""];
+  let pinInputRefs: HTMLInputElement[] = [];
+  
+  // QR Mode
+  let videoRef: HTMLVideoElement;
+  let canvasRef: HTMLCanvasElement;
+  let stream: MediaStream | null = null;
+  let scanning = false;
+  let cameraError = "";
+  let qrSuccessShow = false;
+  let scanInterval: any;
+  
+  // Functions
+  function switchActionMode(mode: "checkin" | "checkout") {
+    verifyActionMode = mode;
+    clearPins();
+    verifyErrorMessage = "";
+    lastVerifySuccess = false;
+    lastCheckOutSuccess = false;
+  }
+  
+  function switchVerifyMode(mode: "pin" | "qr") {
+    verifyMode = mode;
+    clearPins();
+    verifyErrorMessage = "";
+    
+    if (mode === "qr") {
+      setTimeout(() => startCamera(), 100);
+    } else {
+      stopCamera();
+    }
+  }
+  
+  function clearPins() {
+    pins = ["", "", "", "", "", ""];
+    verifyErrorMessage = "";
+    verifyErrorIndex = null;
+    pinInputRefs[0]?.focus();
+  }
+  
+  function handlePinInput(index: number, event: Event) {
+    const input = event.target as HTMLInputElement;
+    const value = input.value;
+    
+    // Only allow numbers
+    if (value && !/^\d$/.test(value)) {
+      pins[index] = "";
+      return;
+    }
+    
+    pins[index] = value;
+    
+    // Move to next input
+    if (value && index < 5) {
+      pinInputRefs[index + 1]?.focus();
+    }
+    
+    // Auto submit if enabled and all filled
+    if (autoCheckIn && pins.every(p => p !== "")) {
+      handleVerifyPin();
+    }
+  }
+  
+  function handlePinKeydown(index: number, event: KeyboardEvent) {
+    if (event.key === "Backspace" && !pins[index] && index > 0) {
+      pinInputRefs[index - 1]?.focus();
+    }
+  }
+  
+  function handlePinFocus(index: number) {
+    verifyErrorMessage = "";
+    verifyErrorIndex = null;
+  }
+  
+  async function handleVerifyPin() {
+    const code = pins.join("");
+    if (code.length !== 6) return;
     
     isVerifying = true;
-    errorMessage = '';
-    successMessage = '';
-    participant = null;
+    verifyErrorMessage = "";
+    verifyErrorIndex = null;
     
     try {
-      const response = await api.post(endpoints.participants.verify, {
-        code: codeValue,
-        action: mode
-      });
+      const endpoint = verifyActionMode === "checkout" ? '/api/checkout/pin' : '/api/checkin/pin';
+      const response = await api.post(endpoint, { code });
       
-      participant = response.data;
-      successMessage = lang === 'th' 
-        ? `${mode === 'check-in' ? 'เช็คอิน' : 'เช็คเอาท์'}สำเร็จ!`
-        : `${mode === 'check-in' ? 'Check-in' : 'Check-out'} successful!`;
+      // Success
+      lastParticipantName = response.data.participant_name || "Participant";
       
-      // Auto-clear after 3 seconds in auto mode
-      if (autoMode) {
-        autoTimer = setTimeout(() => {
-          handleReset();
-        }, 3000);
+      if (verifyActionMode === "checkout") {
+        lastCheckOutSuccess = true;
+        setTimeout(() => { lastCheckOutSuccess = false; }, 3000);
+      } else {
+        lastVerifySuccess = true;
+        setTimeout(() => { lastVerifySuccess = false; }, 3000);
       }
+      
+      clearPins();
+      
     } catch (error: any) {
-      errorMessage = error.response?.data?.message || (lang === 'th' ? 'ตรวจสอบรหัสล้มเหลว' : 'Verification failed');
-      console.error('Error verifying code:', error);
-      
-      // Auto-clear error after 3 seconds in auto mode
-      if (autoMode) {
-        autoTimer = setTimeout(() => {
-          handleReset();
-        }, 3000);
-      }
+      verifyErrorMessage = error.response?.data?.message || lang.invalidCode;
+      verifyErrorIndex = 0;
     } finally {
       isVerifying = false;
     }
   }
   
-  function handleCodeSubmit(submittedCode: string) {
-    verifyCode(submittedCode);
-  }
-  
-  function handleQRScan(scannedCode: string) {
-    code = scannedCode;
-    verifyCode(scannedCode);
-  }
-  
-  function handleReset() {
-    if (autoTimer) {
-      clearTimeout(autoTimer);
-      autoTimer = null;
+  // QR Scanner
+  async function startCamera() {
+    cameraError = "";
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" }
+      });
+      
+      if (videoRef) {
+        videoRef.srcObject = stream;
+        await videoRef.play();
+        scanning = true;
+        startScanning();
+      }
+    } catch (error) {
+      cameraError = lang.cameraAccessDenied;
+      console.error("Camera error:", error);
     }
-    code = '';
-    participant = null;
-    successMessage = '';
-    errorMessage = '';
   }
   
-  function handleModeChange(newMode: 'check-in' | 'check-out') {
-    mode = newMode;
-    handleReset();
+  function stopCamera() {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      stream = null;
+    }
+    scanning = false;
+    if (scanInterval) {
+      clearInterval(scanInterval);
+    }
   }
   
-  function handleInputModeChange(newInputMode: 'manual' | 'qr') {
-    inputMode = newInputMode;
-    handleReset();
+  function startScanning() {
+    if (scanInterval) clearInterval(scanInterval);
+    
+    scanInterval = setInterval(() => {
+      if (!videoRef || !canvasRef || !scanning || isVerifying) return;
+      
+      const canvas = canvasRef;
+      const video = videoRef;
+      const ctx = canvas.getContext("2d");
+      
+      if (!ctx) return;
+      
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height);
+      
+      if (code) {
+        handleQRCode(code.data);
+      }
+    }, 100);
   }
+  
+  async function handleQRCode(data: string) {
+    if (isVerifying) return;
+    
+    isVerifying = true;
+    verifyErrorMessage = "";
+    
+    try {
+      const endpoint = verifyActionMode === "checkout" ? '/api/checkout/qr' : '/api/checkin/qr';
+      const response = await api.post(endpoint, { qr_data: data });
+      
+      // Success
+      lastParticipantName = response.data.participant_name || "Participant";
+      qrSuccessShow = true;
+      
+      if (verifyActionMode === "checkout") {
+        lastCheckOutSuccess = true;
+      } else {
+        lastVerifySuccess = true;
+      }
+      
+      setTimeout(() => {
+        qrSuccessShow = false;
+        lastVerifySuccess = false;
+        lastCheckOutSuccess = false;
+      }, 2000);
+      
+    } catch (error: any) {
+      verifyErrorMessage = error.response?.data?.message || lang.invalidCode;
+    } finally {
+      isVerifying = false;
+    }
+  }
+  
+  onMount(() => {
+    pinInputRefs[0]?.focus();
+  });
+  
+  onDestroy(() => {
+    stopCamera();
+  });
 </script>
 
-<div class="verify-code-page">
-  <div class="page-header">
-    <h1 class="page-title">{t('verifyCode')}</h1>
-    <p class="page-subtitle">
-      {lang === 'th' ? 'ตรวจสอบรหัสเช็คอิน/เช็คเอาท์' : 'Verify check-in/check-out codes'}
-    </p>
-  </div>
-  
-  <div class="controls-bar">
-    <div class="mode-selector">
-      <button 
-        class="mode-btn" 
-        class:active={mode === 'check-in'}
-        on:click={() => handleModeChange('check-in')}
-      >
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+<div class="vc-container">
+  <div class="vc-main-card">
+    <!-- ACTION MODE SELECTOR (Check-in / Check-out) -->
+    <div class="vc-action-selector">
+      <button class="vc-action-tab" class:active={verifyActionMode === "checkin"} on:click={() => switchActionMode("checkin")}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+          <polyline points="10 17 15 12 10 7" />
+          <line x1="15" y1="12" x2="3" y2="12" />
         </svg>
-        {lang === 'th' ? 'เช็คอิน' : 'Check-in'}
+        <span>{lang.checkIn}</span>
       </button>
       
-      <button 
-        class="mode-btn" 
-        class:active={mode === 'check-out'}
-        on:click={() => handleModeChange('check-out')}
-      >
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+      <button class="vc-action-tab checkout" class:active={verifyActionMode === "checkout"} on:click={() => switchActionMode("checkout")}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <polyline points="16 17 21 12 16 7" />
+          <line x1="21" y1="12" x2="9" y2="12" />
         </svg>
-        {lang === 'th' ? 'เช็คเอาท์' : 'Check-out'}
-      </button>
-    </div>
-    
-    <div class="input-mode-selector">
-      <button 
-        class="input-mode-btn" 
-        class:active={inputMode === 'manual'}
-        on:click={() => handleInputModeChange('manual')}
-      >
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-        </svg>
-        {lang === 'th' ? 'กรอกเอง' : 'Manual'}
+        <span>{lang.checkOut}</span>
       </button>
       
-      <button 
-        class="input-mode-btn" 
-        class:active={inputMode === 'qr'}
-        on:click={() => handleInputModeChange('qr')}
-      >
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-        </svg>
-        QR Scanner
-      </button>
+      <div class="vc-action-slider" class:checkout={verifyActionMode === "checkout"}></div>
     </div>
-    
-    <AutoToggle bind:enabled={autoMode} />
-  </div>
-  
-  {#if successMessage}
-    <SuccessAlert message={successMessage} autoDismiss={autoMode} />
-  {/if}
-  
-  {#if errorMessage}
-    <ErrorMessage message={errorMessage} onDismiss={() => errorMessage = ''} />
-  {/if}
-  
-  <div class="verify-section">
-    {#if inputMode === 'manual'}
-      <CodeInput
-        bind:code
-        onSubmit={handleCodeSubmit}
-        {isVerifying}
-        {mode}
-      />
-    {:else}
-      <QRScanner
-        onScan={handleQRScan}
-        {isVerifying}
-        {mode}
-      />
-    {/if}
-    
-    {#if participant}
-      <ParticipantInfo {participant} {mode} />
-    {/if}
-  </div>
-  
-  {#if participant || errorMessage}
-    <div class="action-buttons">
-      <button class="btn-reset" on:click={handleReset}>
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
-        {lang === 'th' ? 'ตรวจสอบใหม่' : 'Check Another'}
-      </button>
+
+    <!-- CARD HEADER -->
+    <div class="vc-card-header">
+      <div class="vc-icon-wrapper" class:checkout={verifyActionMode === "checkout"}>
+        <div class="vc-icon-bg"></div>
+        {#if verifyActionMode === "checkout"}
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+        {:else}
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        {/if}
+      </div>
+      <h2 class="vc-title">{verifyActionMode === "checkout" ? lang.participantCheckOut : lang.participantCheckIn}</h2>
+      <p class="vc-subtitle">{verifyActionMode === "checkout" ? lang.verifyParticipantCodeOut : lang.verifyParticipantCode}</p>
     </div>
-  {/if}
+
+    <!-- MODE SELECTOR (PIN / QR) -->
+    <div class="vc-mode-selector" class:checkout={verifyActionMode === "checkout"}>
+      <button class="vc-mode-tab" class:active={verifyMode === "pin"} class:checkout={verifyActionMode === "checkout"} on:click={() => switchVerifyMode("pin")}>
+        <div class="vc-mode-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7"></rect>
+            <rect x="14" y="3" width="7" height="7"></rect>
+            <rect x="14" y="14" width="7" height="7"></rect>
+            <rect x="3" y="14" width="7" height="7"></rect>
+          </svg>
+        </div>
+        <span>{lang.pinCode}</span>
+      </button>
+
+      <button class="vc-mode-tab" class:active={verifyMode === "qr"} class:checkout={verifyActionMode === "checkout"} on:click={() => switchVerifyMode("qr")}>
+        <div class="vc-mode-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 7V5a2 2 0 0 1 2-2h2"></path>
+            <path d="M17 3h2a2 2 0 0 1 2 2v2"></path>
+            <path d="M21 17v2a2 2 0 0 1-2 2h-2"></path>
+            <path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>
+            <rect x="7" y="7" width="10" height="10" rx="1.5"></rect>
+          </svg>
+        </div>
+        <span>{lang.scanQR}</span>
+      </button>
+
+      <div class="vc-mode-slider" class:qr={verifyMode === "qr"} class:checkout={verifyActionMode === "checkout"}></div>
+    </div>
+
+    <!-- SUCCESS MESSAGE -->
+    {#if lastVerifySuccess}
+      <div class="vc-success">
+        <div class="vc-success-check">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+            <path d="M20 6L9 17l-5-5" />
+          </svg>
+        </div>
+        <div class="vc-success-info">
+          <span class="vc-success-label">{currentLang === "th" ? "เช็คอินสำเร็จ" : "Check-in Successful"}</span>
+          <span class="vc-success-name">{lastParticipantName}</span>
+        </div>
+      </div>
+    {/if}
+
+    {#if lastCheckOutSuccess}
+      <div class="vc-success checkout">
+        <div class="vc-success-check checkout">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+            <path d="M20 6L9 17l-5-5" />
+          </svg>
+        </div>
+        <div class="vc-success-info">
+          <span class="vc-success-label checkout">{lang.checkOutSuccess}</span>
+          <span class="vc-success-name">{lastParticipantName}</span>
+        </div>
+      </div>
+    {/if}
+
+    <!-- CONTENT AREA -->
+    <div class="vc-content">
+      <!-- PIN MODE -->
+      <div class="vc-pin-mode" class:active={verifyMode === "pin"}>
+        <!-- Auto Toggle -->
+        <div class="vc-auto-toggle">
+          <div class="vc-auto-info">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+            </svg>
+            <span>{verifyActionMode === "checkout" ? (currentLang === "th" ? "Auto Check Out" : "Auto Check Out") : (currentLang === "th" ? "Auto Check In" : "Auto Check In")}</span>
+          </div>
+          <button class="vc-switch" class:checkout={verifyActionMode === "checkout"} class:on={autoCheckIn} on:click={() => { autoCheckIn = !autoCheckIn; clearPins(); }}>
+            <span class="vc-switch-knob"></span>
+          </button>
+        </div>
+
+        <!-- PIN INPUT -->
+        <div class="vc-pin-area">
+          <div class="vc-pin-row">
+            {#each pins as pin, i}
+              <div class="vc-pin-cell" class:filled={pin !== ""} class:checkout={verifyActionMode === "checkout"} class:error={verifyErrorIndex !== null && (verifyErrorMessage ? true : verifyErrorIndex === i)}>
+                <input type="text" inputmode="numeric" maxlength="1" class="vc-pin-input" bind:value={pins[i]} bind:this={pinInputRefs[i]} on:input={(e) => handlePinInput(i, e)} on:keydown={(e) => handlePinKeydown(i, e)} on:focus={() => handlePinFocus(i)} disabled={isVerifying} />
+              </div>
+            {/each}
+          </div>
+        </div>
+
+        <!-- ERROR -->
+        {#if verifyErrorMessage && verifyMode === "pin"}
+          <div class="vc-error-msg">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <span>{verifyErrorMessage}</span>
+          </div>
+        {/if}
+
+        <!-- SUBMIT BUTTON -->
+        <div class="vc-submit-wrapper" class:hidden={autoCheckIn}>
+          <button class="vc-submit" class:checkout={verifyActionMode === "checkout"} on:click={handleVerifyPin} disabled={isVerifying || pins.some((p) => p === "") || autoCheckIn}>
+            {#if isVerifying}
+              <span class="vc-loader"></span>
+              <span>{currentLang === "th" ? "กำลังตรวจสอบ..." : "Verifying..."}</span>
+            {:else if verifyActionMode === "checkout"}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+              <span>{lang.checkOut}</span>
+            {:else}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>{lang.checkIn}</span>
+            {/if}
+          </button>
+        </div>
+
+        <!-- LOADING STATE -->
+        {#if isVerifying && autoCheckIn}
+          <div class="vc-verifying">
+            <span class="vc-loader lg"></span>
+            <span>{currentLang === "th" ? "กำลังตรวจสอบรหัส..." : "Verifying code..."}</span>
+          </div>
+        {/if}
+
+        <!-- HINT -->
+        <p class="vc-hint">
+          {#if autoCheckIn}
+            {lang.enterDigitCode} • {verifyActionMode === "checkout" ? lang.autoCheckOutEnabled : lang.autoCheckInEnabled}
+          {:else}
+            {lang.enterDigitCode} • {verifyActionMode === "checkout" ? lang.pressCheckOut : lang.pressCheckIn}
+          {/if}
+        </p>
+      </div>
+
+      <!-- QR MODE -->
+      <div class="vc-qr-mode" class:active={verifyMode === "qr"}>
+        <div class="vc-scanner">
+          {#if cameraError}
+            <div class="vc-camera-err">
+              <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
+                <circle cx="12" cy="13" r="4" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+              <p>{cameraError}</p>
+              <button class="vc-retry" on:click={startCamera}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M23 4v6h-6M1 20v-6h6" />
+                  <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+                </svg>
+                Try Again
+              </button>
+            </div>
+          {:else}
+            <video bind:this={videoRef} class="vc-video" playsinline muted></video>
+            <canvas bind:this={canvasRef} class="vc-canvas"></canvas>
+
+            <!-- SCANNER OVERLAY -->
+            <div class="vc-scan-overlay">
+              <div class="vc-scan-frame" class:active={scanning && !isVerifying && !qrSuccessShow} class:success={qrSuccessShow} class:checkout={verifyActionMode === "checkout"}>
+                <span class="vc-frame-corner tl"></span>
+                <span class="vc-frame-corner tr"></span>
+                <span class="vc-frame-corner bl"></span>
+                <span class="vc-frame-corner br"></span>
+                {#if scanning && !isVerifying && !qrSuccessShow}
+                  <div class="vc-scan-beam" class:checkout={verifyActionMode === "checkout"}></div>
+                {/if}
+              </div>
+
+              <!-- QR SUCCESS OVERLAY -->
+              {#if qrSuccessShow}
+                <div class="vc-qr-success" class:checkout={verifyActionMode === "checkout"}>
+                  <div class="vc-qr-success-icon" class:checkout={verifyActionMode === "checkout"}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                      <path d="M5 13l4 4L19 7"></path>
+                    </svg>
+                  </div>
+                  <span class="vc-qr-success-text">{lastParticipantName}</span>
+                  <span class="vc-qr-success-label" class:checkout={verifyActionMode === "checkout"}>
+                    {verifyActionMode === "checkout" ? (currentLang === "th" ? "เช็คเอาท์สำเร็จ!" : "Check-out Success!") : (currentLang === "th" ? "เช็คอินสำเร็จ!" : "Check-in Success!")}
+                  </span>
+                </div>
+              {/if}
+            </div>
+
+            <!-- STATUS BADGE -->
+            {#if isVerifying}
+              <div class="vc-scan-status verifying">
+                <span class="vc-loader sm"></span>
+                <span>Verifying...</span>
+              </div>
+            {:else if qrSuccessShow}
+              <div class="vc-scan-status success" class:checkout={verifyActionMode === "checkout"}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                  <path d="M5 13l4 4L19 7"></path>
+                </svg>
+                <span>{verifyActionMode === "checkout" ? "Check-out OK!" : "Check-in OK!"}</span>
+              </div>
+            {:else if scanning}
+              <div class="vc-scan-status active" class:checkout={verifyActionMode === "checkout"}>
+                <span class="vc-pulse-dot" class:checkout={verifyActionMode === "checkout"}></span>
+                <span>Scanning...</span>
+              </div>
+            {/if}
+          {/if}
+        </div>
+
+        <!-- ERROR -->
+        {#if verifyErrorMessage && verifyMode === "qr"}
+          <div class="vc-error-msg">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 8v4m0 4h.01" />
+            </svg>
+            <span>{verifyErrorMessage}</span>
+          </div>
+        {/if}
+
+        <p class="vc-hint">{lang.pointCameraAtQR}</p>
+      </div>
+    </div>
+  </div>
 </div>
 
+ENDFILE
+
+echo "Script and HTML complete, adding CSS..."
+
 <style>
-  .verify-code-page { max-width: 900px; margin: 0 auto; padding: 2rem; }
-  .page-header { text-align: center; margin-bottom: 2rem; }
-  .page-title { font-size: 2rem; font-weight: 700; color: var(--text); margin: 0; }
-  .page-subtitle { font-size: 0.875rem; color: var(--text-muted); margin: 0.5rem 0 0; }
-  
-  .controls-bar { display: flex; gap: 1rem; margin-bottom: 2rem; justify-content: center; flex-wrap: wrap; }
-  
-  .mode-selector, .input-mode-selector { display: flex; gap: 0.5rem; background: white; border: 1px solid var(--border); border-radius: 8px; padding: 0.25rem; }
-  
-  .mode-btn, .input-mode-btn { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.25rem; background: transparent; border: none; border-radius: 6px; font-size: 0.875rem; font-weight: 600; color: var(--text); cursor: pointer; transition: all 0.2s; }
-  .mode-btn:hover, .input-mode-btn:hover { background: var(--bg-alt); }
-  .mode-btn.active, .input-mode-btn.active { background: var(--primary); color: white; }
-  .mode-btn svg, .input-mode-btn svg { width: 18px; height: 18px; }
-  
-  .verify-section { background: white; border: 1px solid var(--border); border-radius: 12px; padding: 2rem; margin-bottom: 1.5rem; }
-  
-  .action-buttons { display: flex; justify-content: center; }
-  .btn-reset { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.5rem; background: white; border: 1px solid var(--border); border-radius: 8px; font-size: 0.875rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
-  .btn-reset:hover { background: var(--bg-alt); border-color: var(--primary); }
-  .btn-reset svg { width: 18px; height: 18px; }
-  
-  @media (max-width: 768px) {
-    .verify-code-page { padding: 1rem; }
-    .controls-bar { flex-direction: column; }
-    .mode-selector, .input-mode-selector { justify-content: center; }
+  /* CONTAINER */
+  .vc-container {
+    padding: 2rem 1.5rem;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+
+  .vc-main-card {
+    background: rgba(30, 41, 59, 0.6);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 24px;
+    padding: 2rem;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+  }
+
+  /* ACTION SELECTOR (Check-in/Check-out) */
+  .vc-action-selector {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    background: rgba(15, 23, 42, 0.5);
+    padding: 0.5rem;
+    border-radius: 16px;
+    margin-bottom: 2rem;
+  }
+
+  .vc-action-tab {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.875rem 1rem;
+    background: transparent;
+    border: none;
+    border-radius: 12px;
+    color: #94a3b8;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+
+  .vc-action-tab svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .vc-action-tab.active {
+    color: #10b981;
+  }
+
+  .vc-action-tab.checkout.active {
+    color: #f59e0b;
+  }
+
+  .vc-action-slider {
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    width: calc(50% - 0.25rem);
+    height: calc(100% - 1rem);
+    background: linear-gradient(135deg, #10b981, #059669);
+    border-radius: 12px;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1;
+  }
+
+  .vc-action-slider.checkout {
+    transform: translateX(calc(100% + 0.5rem));
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+  }
+
+  /* CARD HEADER */
+  .vc-card-header {
+    text-align: center;
+    margin-bottom: 2rem;
+  }
+
+  .vc-icon-wrapper {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 1.5rem;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .vc-icon-bg {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.1));
+    border-radius: 50%;
+    animation: pulse-ring 2s infinite;
+  }
+
+  .vc-icon-wrapper.checkout .vc-icon-bg {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(217, 119, 6, 0.1));
+  }
+
+  .vc-icon-wrapper svg {
+    position: relative;
+    z-index: 1;
+    color: #10b981;
+  }
+
+  .vc-icon-wrapper.checkout svg {
+    color: #f59e0b;
+  }
+
+  .vc-title {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #f8fafc;
+    margin: 0 0 0.5rem 0;
+  }
+
+  .vc-subtitle {
+    color: #94a3b8;
+    font-size: 0.95rem;
+    margin: 0;
+  }
+
+  /* MODE SELECTOR (PIN/QR) */
+  .vc-mode-selector {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    background: rgba(15, 23, 42, 0.5);
+    padding: 0.5rem;
+    border-radius: 16px;
+    margin-bottom: 2rem;
+  }
+
+  .vc-mode-tab {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 1rem;
+    background: transparent;
+    border: none;
+    border-radius: 12px;
+    color: #64748b;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+
+  .vc-mode-icon {
+    width: 36px;
+    height: 36px;
+    background: rgba(100, 116, 139, 0.1);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s;
+  }
+
+  .vc-mode-tab.active {
+    color: #10b981;
+  }
+
+  .vc-mode-tab.active .vc-mode-icon {
+    background: rgba(16, 185, 129, 0.15);
+  }
+
+  .vc-mode-tab.active .vc-mode-icon svg {
+    color: #10b981;
+  }
+
+  .vc-mode-tab.checkout.active {
+    color: #f59e0b;
+  }
+
+  .vc-mode-tab.checkout.active .vc-mode-icon {
+    background: rgba(245, 158, 11, 0.15);
+  }
+
+  .vc-mode-tab.checkout.active .vc-mode-icon svg {
+    color: #f59e0b;
+  }
+
+  .vc-mode-slider {
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    width: calc(50% - 0.25rem);
+    height: calc(100% - 1rem);
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.1));
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 12px;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1;
+  }
+
+  .vc-mode-slider.qr {
+    transform: translateX(calc(100% + 0.5rem));
+  }
+
+  .vc-mode-slider.checkout {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(217, 119, 6, 0.1));
+    border-color: rgba(245, 158, 11, 0.3);
+  }
+
+  /* SUCCESS MESSAGE */
+  .vc-success {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.25rem 1.5rem;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.05));
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 16px;
+    margin-bottom: 2rem;
+    animation: slideDown 0.3s ease-out;
+  }
+
+  .vc-success.checkout {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(217, 119, 6, 0.05));
+    border-color: rgba(245, 158, 11, 0.3);
+  }
+
+  .vc-success-check {
+    width: 48px;
+    height: 48px;
+    background: #10b981;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .vc-success-check.checkout {
+    background: #f59e0b;
+  }
+
+  .vc-success-check svg {
+    color: white;
+  }
+
+  .vc-success-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .vc-success-label {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #10b981;
+    text-transform: uppercase;
+  }
+
+  .vc-success-label.checkout {
+    color: #f59e0b;
+  }
+
+  .vc-success-name {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #f8fafc;
+  }
+
+  /* CONTENT */
+  .vc-content {
+    position: relative;
+  }
+
+  .vc-pin-mode, .vc-qr-mode {
+    display: none;
+  }
+
+  .vc-pin-mode.active, .vc-qr-mode.active {
+    display: block;
+  }
+
+  /* AUTO TOGGLE */
+  .vc-auto-toggle {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    background: rgba(15, 23, 42, 0.5);
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+  }
+
+  .vc-auto-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: #94a3b8;
+    font-weight: 500;
+  }
+
+  .vc-auto-info svg {
+    color: #f59e0b;
+  }
+
+  .vc-switch {
+    position: relative;
+    width: 56px;
+    height: 32px;
+    background: rgba(100, 116, 139, 0.3);
+    border: none;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+
+  .vc-switch.on {
+    background: #10b981;
+  }
+
+  .vc-switch.checkout.on {
+    background: #f59e0b;
+  }
+
+  .vc-switch-knob {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 24px;
+    height: 24px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.3s;
+  }
+
+  .vc-switch.on .vc-switch-knob {
+    transform: translateX(24px);
+  }
+
+  /* PIN INPUT */
+  .vc-pin-area {
+    margin-bottom: 1.5rem;
+  }
+
+  .vc-pin-row {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.75rem;
+  }
+
+  .vc-pin-cell {
+    position: relative;
+    aspect-ratio: 1;
+    background: rgba(15, 23, 42, 0.5);
+    border: 2px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    transition: all 0.3s;
+  }
+
+  .vc-pin-cell.filled {
+    border-color: #10b981;
+    background: rgba(16, 185, 129, 0.05);
+  }
+
+  .vc-pin-cell.checkout.filled {
+    border-color: #f59e0b;
+    background: rgba(245, 158, 11, 0.05);
+  }
+
+  .vc-pin-cell.error {
+    border-color: #ef4444;
+    background: rgba(239, 68, 68, 0.05);
+    animation: shake 0.3s;
+  }
+
+  .vc-pin-input {
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    border: none;
+    text-align: center;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #f8fafc;
+    caret-color: #10b981;
+  }
+
+  .vc-pin-input:focus {
+    outline: none;
+  }
+
+  .vc-pin-cell.checkout.filled .vc-pin-input {
+    caret-color: #f59e0b;
+  }
+
+  /* ERROR MESSAGE */
+  .vc-error-msg {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem 1.25rem;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 12px;
+    color: #ef4444;
+    margin-bottom: 1.5rem;
+    animation: slideDown 0.3s;
+  }
+
+  .vc-error-msg svg {
+    flex-shrink: 0;
+  }
+
+  /* SUBMIT BUTTON */
+  .vc-submit-wrapper {
+    margin-bottom: 1rem;
+  }
+
+  .vc-submit-wrapper.hidden {
+    display: none;
+  }
+
+  .vc-submit {
+    width: 100%;
+    padding: 1.125rem 1.5rem;
+    background: linear-gradient(135deg, #10b981, #059669);
+    border: none;
+    border-radius: 14px;
+    color: white;
+    font-size: 1rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    cursor: pointer;
+    transition: all 0.3s;
+    box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
+  }
+
+  .vc-submit.checkout {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    box-shadow: 0 8px 20px rgba(245, 158, 11, 0.3);
+  }
+
+  .vc-submit:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 28px rgba(16, 185, 129, 0.4);
+  }
+
+  .vc-submit.checkout:hover:not(:disabled) {
+    box-shadow: 0 12px 28px rgba(245, 158, 11, 0.4);
+  }
+
+  .vc-submit:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* VERIFYING */
+  .vc-verifying {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    padding: 2rem;
+    color: #94a3b8;
+  }
+
+  /* HINT */
+  .vc-hint {
+    text-align: center;
+    color: #64748b;
+    font-size: 0.875rem;
+    margin: 0;
+  }
+
+  /* QR SCANNER */
+  .vc-scanner {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
+    background: #000;
+    border-radius: 16px;
+    overflow: hidden;
+    margin-bottom: 1.5rem;
+  }
+
+  .vc-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .vc-canvas {
+    display: none;
+  }
+
+  .vc-camera-err {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 1rem;
+    padding: 2rem;
+    color: #94a3b8;
+    text-align: center;
+  }
+
+  .vc-retry {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    background: #10b981;
+    border: none;
+    border-radius: 10px;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* SCAN OVERLAY */
+  .vc-scan-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .vc-scan-frame {
+    position: relative;
+    width: 70%;
+    aspect-ratio: 1;
+    border-radius: 16px;
+  }
+
+  .vc-frame-corner {
+    position: absolute;
+    width: 32px;
+    height: 32px;
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+
+  .vc-frame-corner.tl { top: 0; left: 0; border-top: 3px solid; border-left: 3px solid; border-radius: 16px 0 0 0; }
+  .vc-frame-corner.tr { top: 0; right: 0; border-top: 3px solid; border-right: 3px solid; border-radius: 0 16px 0 0; }
+  .vc-frame-corner.bl { bottom: 0; left: 0; border-bottom: 3px solid; border-left: 3px solid; border-radius: 0 0 0 16px; }
+  .vc-frame-corner.br { bottom: 0; right: 0; border-bottom: 3px solid; border-right: 3px solid; border-radius: 0 0 16px 0; }
+
+  .vc-scan-frame.active .vc-frame-corner {
+    border-color: #10b981;
+  }
+
+  .vc-scan-frame.checkout.active .vc-frame-corner {
+    border-color: #f59e0b;
+  }
+
+  .vc-scan-frame.success .vc-frame-corner {
+    border-color: #10b981;
+  }
+
+  .vc-scan-beam {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #10b981, transparent);
+    animation: scan 2s linear infinite;
+  }
+
+  .vc-scan-beam.checkout {
+    background: linear-gradient(90deg, transparent, #f59e0b, transparent);
+  }
+
+  /* QR SUCCESS */
+  .vc-qr-success {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 2rem;
+    background: rgba(16, 185, 129, 0.95);
+    border-radius: 16px;
+    animation: scaleIn 0.3s;
+  }
+
+  .vc-qr-success.checkout {
+    background: rgba(245, 158, 11, 0.95);
+  }
+
+  .vc-qr-success-icon {
+    width: 64px;
+    height: 64px;
+    background: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .vc-qr-success-icon svg {
+    width: 36px;
+    height: 36px;
+    color: #10b981;
+  }
+
+  .vc-qr-success-icon.checkout svg {
+    color: #f59e0b;
+  }
+
+  .vc-qr-success-text {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: white;
+  }
+
+  .vc-qr-success-label {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    text-transform: uppercase;
+  }
+
+  /* SCAN STATUS */
+  .vc-scan-status {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: white;
+  }
+
+  .vc-scan-status.active {
+    color: #10b981;
+  }
+
+  .vc-scan-status.active.checkout {
+    color: #f59e0b;
+  }
+
+  .vc-scan-status.success {
+    background: rgba(16, 185, 129, 0.9);
+  }
+
+  .vc-scan-status.success.checkout {
+    background: rgba(245, 158, 11, 0.9);
+  }
+
+  .vc-pulse-dot {
+    width: 8px;
+    height: 8px;
+    background: #10b981;
+    border-radius: 50%;
+    animation: pulse 1.5s infinite;
+  }
+
+  .vc-pulse-dot.checkout {
+    background: #f59e0b;
+  }
+
+  /* LOADER */
+  .vc-loader {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+
+  .vc-loader.sm {
+    width: 16px;
+    height: 16px;
+  }
+
+  .vc-loader.lg {
+    width: 32px;
+    height: 32px;
+  }
+
+  /* ANIMATIONS */
+  @keyframes pulse-ring {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.1); opacity: 0.8; }
+  }
+
+  @keyframes slideDown {
+    from { transform: translateY(-10px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+  }
+
+  @keyframes scan {
+    0% { transform: translateY(0); }
+    100% { transform: translateY(100%); }
+  }
+
+  @keyframes scaleIn {
+    from { transform: scale(0.8); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  /* RESPONSIVE */
+  @media (max-width: 640px) {
+    .vc-container {
+      padding: 1rem;
+    }
+
+    .vc-main-card {
+      padding: 1.5rem;
+    }
+
+    .vc-title {
+      font-size: 1.5rem;
+    }
+
+    .vc-pin-row {
+      gap: 0.5rem;
+    }
+
+    .vc-pin-input {
+      font-size: 1.25rem;
+    }
   }
 </style>
-
-
-
-
