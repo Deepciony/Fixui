@@ -5,12 +5,18 @@ export default defineConfig({
 	plugins: [sveltekit()],
 	server: {
 		proxy: {
-			// เมื่อไหร่ก็ตามที่ Frontend ยิงไปที่ /api
+            // ส่ง request ที่ขึ้นต้นด้วย /api ไปยัง Backend
 			'/api': {
-				target: 'http://158.108.102.14:8001', // ให้ส่งต่อไปที่ IP นี้แทน
+				target: 'http://158.108.102.14:8001',
 				changeOrigin: true,
-				secure: false,
-			}
+                secure: false,
+			},
+            // ส่ง request ที่ขอรูปภาพ (/uploads) ไปยัง Backend
+            '/uploads': {
+                target: 'http://158.108.102.14:8001',
+                changeOrigin: true,
+                secure: false,
+            }
 		}
 	}
 });

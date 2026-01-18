@@ -151,7 +151,7 @@
 
     {#if formData.imagePreview}
       <div class="ce-summary-image">
-        <img src={formData.imagePreview} alt="Event banner" />
+        <img src={formData.imagePreview} alt="Event banner" on:error={(e) => { e.currentTarget.src = '/image 7.png'; }} />
       </div>
     {/if}
 

@@ -2,34 +2,34 @@
 
 :root {
   /* --- Color Palette --- */
-  --bg-deep: #0f172a;
-  --bar-dark: #1e293b;
-  --emerald-pri: #10b981;
-  --teal-sec: #059669;
-  --text-pure: #f8fafc;
-  --text-muted: #94a3b8;
+  --bg-deep: #0f172a;       /* Slate 900 */
+  --bar-dark: #1e293b;      /* Slate 800 */
+  --emerald-pri: #10b981;   /* Emerald 500 */
+  --teal-sec: #059669;      /* Emerald 600 */
+  --text-pure: #f8fafc;     /* Slate 50 */
+  --text-muted: #94a3b8;    /* Slate 400 */
   
-  --danger: #ef4444;
-  --warning: #f59e0b;
-  --info: #3b82f6;
+  --danger: #ef4444;        /* Red 500 */
+  --warning: #f59e0b;       /* Amber 500 */
+  --info: #3b82f6;          /* Blue 500 */
 
   --nav-height: 72px;
   --border-light: rgba(255, 255, 255, 0.05);
   --shadow-card: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
 }
 
-/* --- 🔥 แก้จุดสำคัญ: ปลดล็อคการเลื่อนหน้า (Fix Scrolling) --- */
+/* --- Global Reset & Scrollbar Settings --- */
 :global(html) {
-  /* ห้ามใช้ overflow: hidden เด็ดขาด */
-  overflow-y: scroll !important; 
-  height: 100%; 
+  height: 100%;
+  overflow-y: scroll !important; /* บังคับให้มีกลไกการเลื่อนหน้าเสมอ */
+  scrollbar-width: none !important; /* ซ่อน Scrollbar (Firefox) */
+  -ms-overflow-style: none !important; /* ซ่อน Scrollbar (IE/Edge) */
 }
 
 :global(body) {
-  /* ปล่อยให้ body ยืดตามเนื้อหา */
   min-height: 100%;
-  height: auto !important;
-  overflow-y: visible !important; 
+  height: auto !important; /* ให้ความสูงยืดตามเนื้อหา */
+  overflow-y: visible !important; /* ห้ามตัดเนื้อหาส่วนเกินทิ้ง */
   
   margin: 0;
   padding: 0;
@@ -39,8 +39,12 @@
   -webkit-font-smoothing: antialiased;
 }
 
-/* ลบโค้ดซ่อน Scrollbar ออก เพื่อให้แน่ใจว่าใช้เมาส์เลื่อนได้ */
-/* :global(::-webkit-scrollbar) { display: none !important; } */
+/* ซ่อน Scrollbar (Chrome, Safari, Webkit) */
+:global(::-webkit-scrollbar) { 
+  display: none !important; 
+  width: 0px !important;
+  background: transparent !important;
+}
 
 * { box-sizing: border-box; }
 
@@ -48,9 +52,8 @@
 .app-container {
   display: flex;
   flex-direction: column;
-  /* ใช้ min-height แทน height เพื่อให้ยืดลงไปได้เรื่อยๆ */
   min-height: 100vh;
-  overflow: visible !important; /* ห้ามตัดเนื้อหาส่วนเกินทิ้ง */
+  overflow: visible !important;
 }
 
 .page-content {
@@ -63,7 +66,6 @@
   max-width: 1400px;
   margin-left: auto;
   margin-right: auto;
-  /* ห้ามล็อคความสูงตรงนี้ */
   height: auto !important;
   overflow: visible !important;
 }

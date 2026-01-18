@@ -107,11 +107,13 @@
         src={ce_formData.imagePreview}
         alt="Preview"
         class="ce-preview-img"
+        on:error={(e) => { e.currentTarget.src = '/image 7.png'; }}
       />
       <div class="ce-overlay">
         <span>{lang === 'th' ? 'เปลี่ยนรูปภาพ' : 'Change Image'}</span>
       </div>
     {:else}
+      <img src="/image 7.png" alt="No Banner" class="ce-preview-img" style="opacity:0.5;object-fit:contain;" />
       <div class="ce-upload-placeholder">
         <div class="ce-icon-upload">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">

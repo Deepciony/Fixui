@@ -1,41 +1,5 @@
 <!-- ...existing code... -->
-<script lang="ts">
-  // ...existing code...
-</script>
-
 <!-- ...existing code... -->
-<style>
-  /* ✅ Hide scrollbars for all browsers */
-  .app-container {
-    scrollbar-width: none !important; /* Firefox */
-    -ms-overflow-style: none !important; /* IE/Edge */
-  }
-  .page-content {
-    scrollbar-width: none !important; /* Firefox */
-    -ms-overflow-style: none !important; /* IE/Edge */
-  }
-  .app-container::-webkit-scrollbar {
-    width: 0 !important;
-    height: 0 !important;
-    display: none !important;
-    background: transparent !important;
-  }
-  .page-content::-webkit-scrollbar {
-    width: 0 !important;
-    height: 0 !important;
-    display: none !important;
-    background: transparent !important;
-  }
-  .app-container::-webkit-scrollbar-thumb {
-    background: transparent !important;
-    border: none !important;
-  }
-  .page-content::-webkit-scrollbar-thumb {
-    background: transparent !important;
-    border: none !important;
-  }
-  /* ...existing style code... */
-</style>
 <script lang="ts">
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
@@ -206,7 +170,7 @@
     <div class="header-inner">
       <div class="brand">
         <div class="logo-container">
-          <img src="/image 7.png" alt="Logo" class="brand-logo" />
+          <img src="/logo-ku.png" alt="Logo" class="brand-logo" />
         </div>
         <span class="brand-name">{lang.organizer}</span>
       </div>
@@ -296,6 +260,35 @@
 </div>
 
 <style>
+    /* ✅ Hide scrollbars for all browsers */
+    .app-container {
+      scrollbar-width: none !important; /* Firefox */
+      -ms-overflow-style: none !important; /* IE/Edge */
+    }
+    .page-content {
+      scrollbar-width: none !important; /* Firefox */
+      -ms-overflow-style: none !important; /* IE/Edge */
+    }
+    .app-container::-webkit-scrollbar {
+      width: 0 !important;
+      height: 0 !important;
+      display: none !important;
+      background: transparent !important;
+    }
+    .page-content::-webkit-scrollbar {
+      width: 0 !important;
+      height: 0 !important;
+      display: none !important;
+      background: transparent !important;
+    }
+    .app-container::-webkit-scrollbar-thumb {
+      background: transparent !important;
+      border: none !important;
+    }
+    .page-content::-webkit-scrollbar-thumb {
+      background: transparent !important;
+      border: none !important;
+    }
   /* CSS Variables */
   :global(:root) {
     --bg-deep: #0f172a;
