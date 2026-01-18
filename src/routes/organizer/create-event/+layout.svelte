@@ -4,7 +4,9 @@
   import axios from 'axios';
   import Swal from 'sweetalert2';
   
-  // ✅ ถ้ามีค่าใน .env ก็ใช้ ถ้าไม่มี (เป็นค่าว่าง) จะใช้ Relative Path ผ่าน Proxy
+  // ✅ Import auth store
+  import { auth } from '$lib/utils/auth';
+
   const envUrl = import.meta.env.VITE_API_BASE_URL || "";
   const API_BASE_URL = envUrl.replace(/\/$/, "");
   
@@ -12,16 +14,69 @@
     baseURL: API_BASE_URL,
     timeout: 30000,
   });
-  
+
+  // ✅ 1. Request Interceptor: Attach fresh token
   api.interceptors.request.use((config) => {
-    const token = localStorage.getItem('access_token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+    let token = null;
+    if (typeof localStorage !== "undefined") {
+        token = localStorage.getItem('access_token');
+    }
+    if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+    }
     return config;
   });
-  
+
+  // ✅ 2. Response Interceptor: Auto-refresh on 401
+  api.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+      const originalRequest = error.config;
+
+      if (error.response && error.response.status === 401 && !originalRequest._retry) {
+          originalRequest._retry = true;
+          console.log("🔄 Token expired, attempting auto-refresh...");
+
+          try {
+              const refreshed = await auth.refreshAccessToken();
+              
+              if (refreshed) {
+                  console.log("✅ Token refreshed successfully. Retrying request...");
+                  const newToken = localStorage.getItem('access_token');
+                  
+                  api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+                  originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
+                  return api(originalRequest);
+              }
+          } catch (refreshErr) {
+              console.error("❌ Auto-refresh failed:", refreshErr);
+          }
+      }
+
+      if (error.response && error.response.status === 401) {
+        console.error("❌ 401 Unauthorized - Session Expired");
+        
+        Swal.fire({
+            title: 'Session Expired',
+            text: 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Login ใหม่',
+            cancelButtonText: 'อยู่ในหน้านี้ต่อ',
+            allowOutsideClick: false
+        }).then((result) => {
+            if (result.isConfirmed) {
+                if (typeof localStorage !== "undefined") localStorage.removeItem('access_token');
+                goto('/auth/login'); 
+            }
+        });
+      }
+      return Promise.reject(error);
+    }
+  );
+
   type Language = "th" | "en";
   let currentLang: Language = "th";
-  
   if (typeof localStorage !== "undefined") {
     const saved = localStorage.getItem("app_language");
     if (saved === "th" || saved === "en") currentLang = saved;
@@ -42,13 +97,14 @@
       holidaysAndExclusions: "วันหยุดและข้อยกเว้น", noHolidaysOption: "ไม่มีวันหยุด",
       excludeWeekendsOption: "หยุดเสาร์-อาทิตย์", specificDatesOption: "เลือกวันที่เฉพาะ",
       addDate: "เพิ่มวันหยุด", 
-      rewardsDistribution: "การจัดการรางวัล (Reward Leaderboard)",
+      rewardsDistribution: "การจัดการรางวัล (แบบแข่งขัน)",
       addTierBtn: "+ เพิ่มระดับรางวัล",
       tierLabel: "ระดับรางวัล",
-      tierNameLabel: "ชื่อระดับ (เช่น Gold)",
+      rewardNameLabel: "ชื่อรางวัล",
       totalRewardsLabel: "จำนวนรางวัลทั้งหมด (คน)",
-      requirementLabel: "วิ่งขั้นต่ำ (รอบ)",
-      rewardNameLabel: "ของรางวัลที่จะได้รับ",
+      requirementLabel: "จำนวนรอบที่ต้องวิ่ง",
+      rewardHelperText: "💡 ระบบจะจัดอันดับตามความยาก ผู้ที่วิ่งได้มากกว่าจะได้รางวัลที่ดีกว่า (จำกัด {total} คนแรก)",
+      tierHelperText: "ผู้เข้าร่วมที่วิ่งครบจำนวนนี้จะได้รับรางวัล (ถ้าอยู่ใน {total} คนแรก)",
       eventStatusTitle: "สถานะกิจกรรม", publicVisibility: "เผยแพร่สาธารณะ", activeOpen: "เปิดใช้งาน",
       error: "เกิดข้อผิดพลาด", success: "สำเร็จ", eventCreated: "สร้างกิจกรรมสำเร็จ!", eventUpdated: "อัพเดทกิจกรรมสำเร็จ!",
       addSpecificDateBtn: "เพิ่มวันหยุด", selectHolidayPlaceholder: "เลือกวันที่หยุดจากช่วงเวลากิจกรรม",
@@ -68,13 +124,14 @@
       holidaysAndExclusions: "Holidays & Exclusions", noHolidaysOption: "No Holidays",
       excludeWeekendsOption: "Exclude Weekends", specificDatesOption: "Specific Dates",
       addDate: "Add Date", 
-      rewardsDistribution: "Reward Leaderboard Config",
+      rewardsDistribution: "Reward Distribution (Competition)",
       addTierBtn: "+ Add Tier",
       tierLabel: "Reward Tier",
-      tierNameLabel: "Tier Name (e.g. Gold)",
-      totalRewardsLabel: "Total Recipients",
+      rewardNameLabel: "Reward Name",
+      totalRewardsLabel: "Total Reward Slots",
       requirementLabel: "Required Runs",
-      rewardNameLabel: "Reward Item Name",
+      rewardHelperText: "💡 System ranks by difficulty. Top performers get better rewards (limited to top {total})",
+      tierHelperText: "Participants who complete this many runs will receive this reward (if in top {total})",
       eventStatusTitle: "Event Status", publicVisibility: "Public Visibility", activeOpen: "Active (Open)",
       error: "Error", success: "Success", eventCreated: "Event created successfully!", eventUpdated: "Event updated successfully!",
       addSpecificDateBtn: "Add Holiday", selectHolidayPlaceholder: "Select holiday within event range",
@@ -85,9 +142,8 @@
   $: lang = translations[currentLang];
   
   interface RewardTierConfig {
-    tier_name: string;      
-    reward_name: string;    
-    min_runs: number | null; 
+    reward_name: string;         // ชื่อรางวัล
+    required_completions: number | null; // จำนวนรอบที่ต้องวิ่งเพื่อได้รางวัลนี้
   }
   
   let formData = {
@@ -98,9 +154,9 @@
     totalSlots: null as number | null, distanceKm: null as number | null,
     holidayType: "none" as "none" | "weekends" | "specific",
     specificDates: [] as string[],
-    selectedHoliday: "", // Dropdown value
+    selectedHoliday: "", 
     totalRewards: null as number | null, 
-    rewardTiers: [{ tier_name: "", reward_name: "", min_runs: null }] as RewardTierConfig[],
+    rewardTiers: [{ reward_name: "", required_completions: null }] as RewardTierConfig[],
     isPublic: true, isActive: true,
     imagePreview: null as string | null, imageFile: null as File | null,
     eventType: "single_day" as "single_day" | "multi_day",
@@ -128,7 +184,6 @@
 
   $: displayMonths = monthNames[currentLang];
 
-  // ✅ Auto-calculate Range for Holiday Dropdown
   let dateRangeOptions: { value: string, label: string }[] = [];
   $: updateDateRange(formData.sDay, formData.sMonth, formData.sYear, formData.eDay, formData.eMonth, formData.eYear);
 
@@ -171,20 +226,15 @@
     }
   });
 
-  // ✅ ฟังก์ชันแก้ URL รูปภาพ (รองรับทั้ง Proxy และ IP ตรง)
   function resolveImageUrl(img: string | null) {
     if (!img) return null;
     if (img.startsWith('http') || img.startsWith('data:')) return img;
     
     const cleanPath = img.startsWith('/') ? img.slice(1) : img;
-    
-    // ถ้า API_BASE_URL เป็นค่าว่าง (ใช้ Proxy)
     if (!API_BASE_URL) {
         if (cleanPath.startsWith('api/')) return `/${cleanPath}`;
         return `/api/${cleanPath}`;
     }
-
-    // ถ้าใช้ API_BASE_URL แบบเต็ม
     const cleanBase = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`;
     if (cleanPath.startsWith('api/')) return `${cleanBase}${cleanPath}`;
     return `${cleanBase}api/${cleanPath}`; 
@@ -213,37 +263,77 @@
       formData.title = data.title;
       formData.description = data.description;
       formData.location = data.location;
-      
       const startDateRaw = data.start_date || data.event_date;
       const endDateRaw = data.end_date || data.event_end_date;
-
       if (startDateRaw) {
         const { year, month, day, time } = extractLocalParts(startDateRaw);
         formData.sYear = year; formData.sMonth = month; formData.sDay = day;
-        formData.startTime = time;
+        // ✅ Prefer start_time from backend, fallback to extracted time
+        formData.startTime = data.start_time?.slice(0, 5) || time;
       }
-      if (data.start_time && !formData.startTime) formData.startTime = data.start_time.slice(0, 5);
-
       if (endDateRaw) {
         const { year, month, day, time } = extractLocalParts(endDateRaw);
         formData.eYear = year; formData.eMonth = month; formData.eDay = day;
-        formData.endTime = time;
+        // ✅ Prefer end_time from backend, fallback to extracted time
+        formData.endTime = data.end_time?.slice(0, 5) || time;
       }
-      if (data.end_time && !formData.endTime) formData.endTime = data.end_time.slice(0, 5);
 
       formData.totalSlots = data.max_participants;
       formData.distanceKm = data.distance_km;
       formData.eventType = data.event_type || 'single_day';
       formData.maxCheckinsPerUser = data.max_checkins_per_user || 1;
       
-      formData.holidayType = 'none'; 
-      formData.specificDates = []; 
+      // ✅ Load existing holidays
+      try {
+        const holidaysRes = await api.get(`/api/events/${id}/holidays`);
+        if (holidaysRes.data && holidaysRes.data.holidays && Array.isArray(holidaysRes.data.holidays) && holidaysRes.data.holidays.length > 0) {
+          const holidays = holidaysRes.data.holidays;
+          
+          // Convert to date strings
+          const holidayDateStrings = holidays.map((h: any) => {
+            const d = new Date(h.holiday_date);
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+          });
+          
+          // Check if these are weekends (auto-detect)
+          if (startDateRaw && endDateRaw) {
+            const weekendDates = getWeekendDates(
+              new Date(startDateRaw).toISOString().split('T')[0],
+              new Date(endDateRaw).toISOString().split('T')[0]
+            );
+            
+            const isWeekendPattern = weekendDates.length > 0 && 
+                                    weekendDates.length === holidayDateStrings.length &&
+                                    weekendDates.every(wd => holidayDateStrings.includes(wd));
+            
+            if (isWeekendPattern) {
+              formData.holidayType = 'weekends';
+            } else {
+              formData.holidayType = 'specific';
+              formData.specificDates = holidayDateStrings;
+            }
+          } else {
+            formData.holidayType = 'specific';
+            formData.specificDates = holidayDateStrings;
+          }
+        }
+      } catch (hErr) {
+        console.warn("No holidays found or error loading:", hErr);
+      }
 
-      formData.isPublic = data.is_public;
-      formData.isActive = data.is_active;
+      formData.isPublic = data.is_public ?? data.is_published ?? true;
+      formData.isActive = data.is_active ?? true;
+      console.log("📊 Loaded status:", { 
+        isPublic: formData.isPublic, 
+        isActive: formData.isActive,
+        from_backend: { is_public: data.is_public, is_active: data.is_active }
+      });
       formData.imagePreview = resolveImageUrl(data.banner_image_url || data.image || data.image_url);
-
-      // ✅ Fetch Reward Config (Dack Error 500)
+      
+      // ✅ Load reward config (optional - don't fail if not found)
       try {
         const configRes = await api.get(`/api/reward-leaderboards/configs/event/${id}`);
         const config = configRes.data;
@@ -251,15 +341,30 @@
           editingRewardConfigId = config.id;
           formData.totalRewards = config.max_reward_recipients;
           if (config.reward_tiers && config.reward_tiers.length > 0) {
-            formData.rewardTiers = config.reward_tiers.map((t: any) => ({
-              tier_name: t.tier_name || `Tier ${t.tier}`,
-              reward_name: t.reward_name,
-              min_runs: t.required_completions || 0
-            }));
+            console.log("Loading reward tiers:", config.reward_tiers);
+            formData.rewardTiers = config.reward_tiers.map((t: any) => {
+              const rewardName = t.reward_name || t.reward?.name || t.name || "";
+              console.log("Tier:", t, "→ Name:", rewardName);
+              return {
+                reward_name: rewardName,
+                required_completions: t.required_completions || 0
+              };
+            });
+            console.log("Loaded tiers:", formData.rewardTiers);
           }
         }
-      } catch (err) {
-        console.warn("No existing reward config (normal for new setup).");
+      } catch (err: any) {
+        // Don't fail the whole page if reward config has issues
+        if (err.response?.status === 404) {
+            console.warn("No existing reward config - will create new one if needed");
+        } else if (err.response?.status === 500) {
+            console.warn("Reward config exists but has errors - will recreate on save");
+            // Clear any corrupt config
+            editingRewardConfigId = null;
+        } else {
+            console.error("Error fetching reward config:", err);
+        }
+        // Always continue - reward config is optional
       }
 
       Swal.close();
@@ -272,11 +377,75 @@
 
   function toggleDropdown(name: string) { activeDropdown = activeDropdown === name ? null : name; }
   function selectOption(field: string, value: any) { 
-    (formData as any)[field] = String(value); 
+    (formData as any)[field] = String(value);
+    
+    // ✅ Single day: sync end date with start date
+    if (formData.eventType === 'single_day') {
+      if (field === 'sDay') formData.eDay = String(value);
+      if (field === 'sMonth') formData.eMonth = String(value);
+      if (field === 'sYear') formData.eYear = String(value);
+    }
+    
+    // ✅ Multi-day: recalculate max check-ins when dates change
+    if (formData.eventType === 'multi_day' && 
+        (field.includes('Day') || field.includes('Month') || field.includes('Year'))) {
+      setTimeout(() => calculateMaxCheckins(), 50);
+    }
+    
     formData = formData; 
     activeDropdown = null; 
   }
-  function setEventType(type: "single_day" | "multi_day") { formData.eventType = type; if (type === "single_day") formData.maxCheckinsPerUser = 1; }
+  function setEventType(type: "single_day" | "multi_day") { 
+    formData.eventType = type;
+    
+    // ✅ Single day: sync end date = start date
+    if (type === "single_day") {
+      formData.eDay = formData.sDay;
+      formData.eMonth = formData.sMonth;
+      formData.eYear = formData.sYear;
+      formData.maxCheckinsPerUser = 1;
+    } else {
+      // Multi-day: auto-calculate max check-ins
+      calculateMaxCheckins();
+    }
+  }
+  
+  // ✅ Auto-calculate max check-ins based on date range and holidays
+  function calculateMaxCheckins() {
+    if (formData.eventType !== 'multi_day') return;
+    
+    try {
+      const startDateStr = `${formData.sYear}-${String(months.indexOf(formData.sMonth) + 1).padStart(2, '0')}-${String(formData.sDay).padStart(2, '0')}`;
+      const endDateStr = `${formData.eYear}-${String(months.indexOf(formData.eMonth) + 1).padStart(2, '0')}-${String(formData.eDay).padStart(2, '0')}`;
+      
+      const start = new Date(startDateStr);
+      const end = new Date(endDateStr);
+      
+      if (isNaN(start.getTime()) || isNaN(end.getTime()) || end < start) {
+        return;
+      }
+      
+      // Count total days
+      const totalDays = Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      
+      // Count holidays
+      let holidayCount = 0;
+      if (formData.holidayType === 'weekends') {
+        const weekendDates = getWeekendDates(startDateStr, endDateStr);
+        holidayCount = weekendDates.length;
+      } else if (formData.holidayType === 'specific') {
+        holidayCount = formData.specificDates.length;
+      }
+      
+      // Available check-in days = total - holidays
+      const availableDays = Math.max(1, totalDays - holidayCount);
+      formData.maxCheckinsPerUser = availableDays;
+      
+      console.log(`📊 Max check-ins: ${totalDays} days - ${holidayCount} holidays = ${availableDays}`);
+    } catch (e) {
+      console.warn("Could not auto-calculate:", e);
+    }
+  }
   function triggerFileInput() { fileInput?.click(); }
   function handleImageUpload(e: Event) {
     const input = e.target as HTMLInputElement;
@@ -294,13 +463,24 @@
       if (!formData.specificDates.includes(formData.selectedHoliday)) {
         formData.specificDates = [...formData.specificDates, formData.selectedHoliday];
         formData.selectedHoliday = ""; 
+        
+        // ✅ Recalculate max check-ins
+        if (formData.eventType === 'multi_day') {
+          setTimeout(() => calculateMaxCheckins(), 50);
+        }
       }
     } else {
         Swal.fire({ icon: 'warning', title: 'ยังไม่ได้เลือกวันที่', text: 'กรุณาเลือกวันที่จากรายการก่อนกดเพิ่ม', background: '#1e293b', color: '#fff', confirmButtonColor: '#10b981' });
     }
   }
-  function removeSpecificDate(date: string) { formData.specificDates = formData.specificDates.filter(d => d !== date); }
-  function addRewardTier() { formData.rewardTiers = [...formData.rewardTiers, { tier_name: "", reward_name: "", min_runs: null }]; }
+  function removeSpecificDate(date: string) { 
+    formData.specificDates = formData.specificDates.filter(d => d !== date); 
+    // ✅ Recalculate max check-ins
+    if (formData.eventType === 'multi_day') {
+      setTimeout(() => calculateMaxCheckins(), 50);
+    }
+  }
+  function addRewardTier() { formData.rewardTiers = [...formData.rewardTiers, { reward_name: "", required_completions: null }]; }
   function removeRewardTier(index: number) { if (formData.rewardTiers.length > 1) { formData.rewardTiers = formData.rewardTiers.filter((_, i) => i !== index); } }
   
   function validate(): boolean {
@@ -340,10 +520,19 @@
       Swal.fire({ title: lang.error, text: lang.fillAllFields, icon: 'error', background: '#1e293b', color: '#fff', confirmButtonColor: '#10b981' });
       return;
     }
+
+    // ✅ Proactive Auth Check
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+         Swal.fire({ title: 'Auth Error', text: 'ไม่พบข้อมูลการเข้าสู่ระบบ กรุณา Login ใหม่', icon: 'error' });
+         goto('/auth/login');
+         return;
+    }
     
     try {
       Swal.fire({ title: 'Saving...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
+      // 1. Upload Image
       let finalImageUrl = formData.imagePreview;
       
       if (formData.imageFile) {
@@ -356,46 +545,149 @@
         } catch (uploadErr) { console.error("Image upload failed", uploadErr); }
       }
 
-      const startDateStr = `${formData.sYear}-${formData.sMonth}-${formData.sDay}`;
-      const endDateStr = `${formData.eYear}-${formData.eMonth}-${formData.eDay}`;
+      // 2. Create/Update Event
+      const startDateStr = `${formData.sYear}-${String(months.indexOf(formData.sMonth) + 1).padStart(2, '0')}-${String(formData.sDay).padStart(2, '0')}`;
+      const endDateStr = `${formData.eYear}-${String(months.indexOf(formData.eMonth) + 1).padStart(2, '0')}-${String(formData.eDay).padStart(2, '0')}`;
+
 
       const payload = {
         title: formData.title,
         description: formData.description,
         location: formData.location,
-        start_date: startDateStr,
-        end_date: endDateStr,
+        event_date: startDateStr, // ✅ Use event_date for consistency
+        event_end_date: endDateStr, // ✅ Use event_end_date
         start_time: formData.startTime,
         end_time: formData.endTime,
         max_participants: Number(formData.totalSlots),
         distance_km: Number(formData.distanceKm || 0),
         event_type: formData.eventType,
         max_checkins_per_user: Number(formData.maxCheckinsPerUser),
+        allow_daily_checkin: formData.eventType === "multi_day", // ✅ Important flag
         is_public: formData.isPublic,
         is_active: formData.isActive,
-        banner_image_url: finalImageUrl, 
+        banner_image_url: finalImageUrl,
+        is_published: formData.isPublic // ✅ Add this for compatibility
       };
+      
+      console.log("💾 Saving event with payload:", {
+        times: {
+          start_time: payload.start_time,
+          end_time: payload.end_time
+        },
+        status: {
+          is_public: payload.is_public,
+          is_active: payload.is_active
+        }
+      });
       
       let targetId = editingEventId;
 
       if (editingEventId) {
         await api.put(`/api/events/${editingEventId}`, payload);
       } else {
-        const res = await api.post('/api/events', payload);
+        const res = await api.post('/api/events/', payload);
         targetId = res.data.id || res.data.event_id; 
       }
 
-      // ✅ 3. Save Rewards (Auto Calculate Ranks to avoid 400 Error)
-      if (formData.totalRewards && formData.rewardTiers.length > 0 && formData.rewardTiers[0].tier_name && targetId) {
+      if (!targetId) {
+        throw new Error("Event ID not returned from API");
+      }
+
+      // 3. Handle Holidays (✅ FIXED: Use proper API endpoints)
+      if (formData.eventType === 'multi_day' && targetId) {
+        let holidayDates: string[] = [];
+        let holidayNames: string[] = [];
+
+        if (formData.holidayType === 'weekends') {
+          holidayDates = getWeekendDates(startDateStr, endDateStr);
+          holidayNames = holidayDates.map(() => "Weekend Holiday");
+        } else if (formData.holidayType === 'specific') {
+          holidayDates = formData.specificDates;
+          holidayNames = formData.specificDates.map((date) => {
+            const d = new Date(date);
+            return d.toLocaleDateString(currentLang === 'th' ? 'th-TH' : 'en-GB', { 
+              day: 'numeric', 
+              month: 'long', 
+              year: 'numeric' 
+            });
+          });
+        }
+
+        // ✅ Clear old holidays first if editing
+        if (editingEventId && formData.holidayType !== 'none') {
+          try {
+            await api.delete(`/api/events/${targetId}/holidays`);
+            console.log('✅ Cleared old holidays');
+          } catch (e) {
+            console.warn("Failed to clear old holidays:", e);
+          }
+        }
+
+        // ✅ Use /quick endpoint for batch holiday creation
+        if (holidayDates.length > 0) {
+          try {
+            const holidayResponse = await api.post(`/api/events/${targetId}/holidays/quick`, {
+              holiday_dates: holidayDates,
+              holiday_names: holidayNames
+            });
+            console.log(`✅ Added ${holidayResponse.data.created_count || holidayDates.length} holidays`);
+          } catch (hErr: any) { 
+            console.error("Failed to add holidays:", hErr);
+            const errMsg = hErr.response?.data?.detail || 'ไม่สามารถเพิ่มวันหยุดได้';
+            Swal.fire({
+              icon: 'warning',
+              title: 'Holiday Warning',
+              text: `กิจกรรมถูกสร้างแล้ว แต่การตั้งค่าวันหยุดมีปัญหา: ${errMsg}`,
+              toast: true,
+              position: 'top-end',
+              timer: 3000,
+              background: '#f59e0b',
+              color: '#fff'
+            });
+          }
+        } else if (editingEventId && formData.holidayType === 'none') {
+          // Clear holidays if user changed from having holidays to none
+          try {
+            await api.delete(`/api/events/${targetId}/holidays`);
+            console.log('✅ Cleared all holidays (user selected none)');
+          } catch (e) {
+            console.warn("No holidays to clear:", e);
+          }
+        }
+      }
+
+      // 4. Handle Rewards (✅ NEW: Competition-based reward system)
+      // Logic: ทุกคนแข่งกันเพื่อรางวัล โดยระบบจะ:
+      // 1. ดูว่าแต่ละคนผ่านเกณฑ์รางวัลไหนบ้าง (เลือกรางวัลที่ใหญ่ที่สุด)
+      // 2. เรียงตามความยากของรางวัล (required_completions) จากมากไปน้อย
+      // 3. ตัดตามจำนวนรางวัลทั้งหมด (max_reward_recipients)
+      // 4. คนที่เหลือ = อด/waitlist (แม้จะผ่านเกณฑ์รางวัลเล็กก็ไม่ได้)
+      if (formData.totalRewards && formData.rewardTiers.length > 0 && formData.rewardTiers[0].reward_name && targetId) {
          
-         const createdTiers = await Promise.all(formData.rewardTiers.map(async (t) => {
+         // สร้าง reward items โดยเรียงจากยากไปง่าย
+         const sortedTiers = [...formData.rewardTiers].sort((a, b) => {
+           const aComp = Number(a.required_completions) || 0;
+           const bComp = Number(b.required_completions) || 0;
+           return bComp - aComp; // มากไปน้อย (ยากไปง่าย)
+         });
+         
+         const createdTiers = await Promise.all(sortedTiers.map(async (t, idx) => {
+             if (!t.reward_name || !t.required_completions || t.required_completions <= 0) {
+               console.warn("Skipping invalid tier:", t);
+               return null;
+             }
+             
              try {
                  const rewardRes = await api.post('/api/rewards/', { 
                      name: t.reward_name, 
-                     description: `Reward for ${t.tier_name}`,
-                     required_completions: 0 
+                     description: `Reward: ${t.reward_name} (${t.required_completions} completions required)`,
+                     required_completions: Number(t.required_completions)
                  });
-                 return { ...t, reward_id: rewardRes.data.id };
+                 return { 
+                   ...t, 
+                   reward_id: rewardRes.data.id,
+                   tier_order: idx + 1 // เรียงจากยากไปง่าย
+                 };
              } catch (e) {
                  console.error("Failed to create reward item:", e);
                  return null;
@@ -405,31 +697,73 @@
          const validTiers = createdTiers.filter(t => t !== null);
 
          if (validTiers.length > 0) {
-             const total = Number(formData.totalRewards) || 1;
-             const perTier = Math.floor(total / validTiers.length);
-             let currentRankStart = 1;
+             const total = Number(formData.totalRewards) || 300;
              
+             // ✅ Build reward_tiers with competition logic
+             // ไม่มี min_rank/max_rank แบบแบ่งชัด แต่ให้ระบบคำนวณเอง
              const rewardConfigPayload = {
                  event_id: Number(targetId),
                  name: `Leaderboard for ${formData.title}`,
-                 description: `Auto-generated leaderboard`, // ✅ เพิ่ม field description
-                 max_reward_recipients: total,
-                 required_completions: 1, 
+                 description: `Competition-based reward distribution`, 
+                 max_reward_recipients: total, // จำนวนรางวัลทั้งหมด (เช่น 300)
+                 required_completions: 1, // ✅ ต้องวิ่งอย่างน้อย 1 รอบเพื่อเข้าลีดเดอร์บอร์ด
                  starts_at: new Date(`${startDateStr}T${formData.startTime}:00`).toISOString(), 
-                 ends_at: new Date(`${endDateStr}T${formData.endTime}:00`).toISOString(),
+                 ends_at: (() => {
+                     // ✅ ถ้าวันเดียว (start = end) ให้ใช้เวลาสิ้นสุดวัน
+                     if (startDateStr === endDateStr && formData.startTime === formData.endTime) {
+                         return new Date(`${endDateStr}T23:59:59`).toISOString();
+                     }
+                     // ✅ ถ้าวันเดียวแต่มีเวลาต่างกัน หรือหลายวัน ใช้ตามปกติ
+                     return new Date(`${endDateStr}T${formData.endTime}:00`).toISOString();
+                 })(),
                  
                  reward_tiers: validTiers.map((t, idx) => {
-                    const isLast = idx === validTiers.length - 1;
-                    const quantity = isLast ? (total - (perTier * (validTiers.length - 1))) : perTier;
-                    const minRank = currentRankStart;
-                    const maxRank = currentRankStart + quantity - 1;
-                    currentRankStart = maxRank + 1;
-
+                    const finalStartsAt = new Date(`${startDateStr}T${formData.startTime}:00`).toISOString();
+                    const finalEndsAt = (() => {
+                        if (startDateStr === endDateStr && formData.startTime === formData.endTime) {
+                            return new Date(`${endDateStr}T23:59:59`).toISOString();
+                        }
+                        return new Date(`${endDateStr}T${formData.endTime}:00`).toISOString();
+                    })();
+                    
+                    console.log(`Building tier ${idx + 1}:`, {
+                        startDateStr,
+                        endDateStr,
+                        startTime: formData.startTime,
+                        endTime: formData.endTime,
+                        starts_at: finalStartsAt,
+                        ends_at: finalEndsAt,
+                        isSameDay: startDateStr === endDateStr,
+                        isSameTime: formData.startTime === formData.endTime
+                    });
+                    
+                    const numTiers = validTiers.length;
+                    const perTier = Math.floor(total / numTiers);
+                    
+                    // Calculate non-overlapping rank ranges
+                    const isLast = idx === numTiers - 1;
+                    const quantity = isLast ? (total - (perTier * (numTiers - 1))) : perTier;
+                    
+                    // Calculate start rank for this tier
+                    let rankStart = 1;
+                    for (let i = 0; i < idx; i++) {
+                        // Add quantity from previous tiers
+                        const isLastPrev = i === numTiers - 1;
+                        const prevQty = isLastPrev ? (total - (perTier * (numTiers - 1))) : perTier;
+                        rankStart += prevQty;
+                    }
+                    
+                    const minRank = rankStart;
+                    const maxRank = rankStart + quantity - 1;
+                    
+                    console.log(`Tier ${idx + 1}: Ranks ${minRank}-${maxRank} (${quantity} slots)`);
+                    
                     return {
-                        tier: idx + 1,
-                        reward_id: t.reward_id, 
-                        quantity: quantity, 
-                        required_completions: Number(t.min_runs) || 1,
+                        tier: t.tier_order,
+                        reward_id: t.reward_id,
+                        reward_name: t.reward_name, // ✅ เพิ่มชื่อรางวัล
+                        quantity: quantity,
+                        required_completions: Number(t.required_completions),
                         min_rank: minRank,
                         max_rank: maxRank
                     };
@@ -438,45 +772,197 @@
 
              try {
                  if (editingRewardConfigId) {
-                     await api.put(`/api/reward-leaderboards/configs/${editingRewardConfigId}`, rewardConfigPayload);
+                     // Try to update existing config
+                     try {
+                         await api.put(`/api/reward-leaderboards/configs/${editingRewardConfigId}`, rewardConfigPayload);
+                     } catch (updateErr: any) {
+                         // If update fails (corrupt config), delete and recreate
+                         console.warn("Update failed, deleting corrupt config and recreating:", updateErr);
+                         try {
+                             await api.delete(`/api/reward-leaderboards/configs/${editingRewardConfigId}`);
+                         } catch (delErr) {
+                             console.warn("Delete failed, will create new:", delErr);
+                         }
+                         await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
+                     }
                  } else {
-                     await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
+                     // Try to create new config
+                     try {
+                         await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
+                     } catch (createErr: any) {
+                         // If creation fails because config already exists, GET it and UPDATE
+                         if (createErr.response?.status === 400 && 
+                             createErr.response?.data?.detail?.includes('already has a leaderboard')) {
+                             console.warn("Config already exists, will fetch and update instead");
+                             
+                             try {
+                                 // Get the existing config
+                                 const existingConfig = await api.get(`/api/reward-leaderboards/configs/event/${rewardConfigPayload.event_id}`);
+                                 const configId = existingConfig.data?.id;
+                                 
+                                 if (configId) {
+                                     console.log("Found existing config ID:", configId, "- updating it");
+                                     // Update the existing config instead of creating new
+                                     await api.put(`/api/reward-leaderboards/configs/${configId}`, rewardConfigPayload);
+                                     console.log("✅ Updated existing reward config");
+                                 } else {
+                                     throw new Error("Config exists but no ID found");
+                                 }
+                             } catch (fetchErr: any) {
+                                 // If GET also fails (500 - corrupt), offer to force delete
+                                 if (fetchErr.response?.status === 500) {
+                                     console.error("Existing config is corrupt and cannot be updated");
+                                     
+                                     // Ask user if they want to force reset
+                                     const result = await Swal.fire({
+                                         icon: 'warning',
+                                         title: 'Corrupt Reward Config Detected',
+                                         html: `
+                                             <p>The existing reward configuration for this event is corrupted.</p>
+                                             <p><strong>Would you like to reset it?</strong></p>
+                                             <p style="font-size: 0.9em; color: #94a3b8; margin-top: 1rem;">
+                                                 This will delete the old configuration and create a new one.
+                                             </p>
+                                         `,
+                                         showCancelButton: true,
+                                         confirmButtonText: 'Yes, Reset Config',
+                                         cancelButtonText: 'Skip for Now',
+                                         confirmButtonColor: '#ef4444',
+                                         cancelButtonColor: '#64748b',
+                                         background: '#1e293b',
+                                         color: '#fff'
+                                     });
+                                     
+                                     if (result.isConfirmed) {
+                                         // User wants to force reset
+                                         try {
+                                             // Try to find config ID from backend logs/database
+                                             // Since GET fails, we'll try to DELETE by event_id endpoint
+                                             console.log("Attempting to force delete corrupt config...");
+                                             
+                                             // Option 1: Try DELETE with event_id if backend supports it
+                                             try {
+                                                 await api.delete(`/api/reward-leaderboards/configs/event/${rewardConfigPayload.event_id}`);
+                                                 console.log("✅ Deleted corrupt config via event_id");
+                                             } catch (delErr) {
+                                                 console.warn("DELETE by event_id not supported, trying direct ID...");
+                                                 
+                                                 // Option 2: Ask backend team to provide DELETE endpoint
+                                                 // For now, show instructions
+                                                 throw new Error("Cannot auto-delete. Please contact support.");
+                                             }
+                                             
+                                             // Now create fresh config
+                                             await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
+                                             console.log("✅ Created fresh reward config");
+                                             
+                                             Swal.fire({
+                                                 icon: 'success',
+                                                 title: 'Config Reset Successful',
+                                                 text: 'Reward configuration has been reset and recreated.',
+                                                 background: '#1e293b',
+                                                 color: '#fff',
+                                                 timer: 2000
+                                             });
+                                         } catch (resetErr: any) {
+                                             console.error("Force reset failed:", resetErr);
+                                             Swal.fire({
+                                                 icon: 'error',
+                                                 title: 'Reset Failed',
+                                                 html: `
+                                                     <p>Could not automatically reset the configuration.</p>
+                                                     <p style="margin-top: 1rem; font-size: 0.9em; color: #94a3b8;">
+                                                         Please contact support with this Event ID: <strong>${rewardConfigPayload.event_id}</strong>
+                                                     </p>
+                                                     <p style="margin-top: 0.5rem; font-size: 0.85em; color: #94a3b8;">
+                                                         SQL: DELETE FROM reward_leaderboard_configs WHERE event_id = ${rewardConfigPayload.event_id};
+                                                     </p>
+                                                 `,
+                                                 background: '#1e293b',
+                                                 color: '#fff'
+                                             });
+                                         }
+                                     } else {
+                                         // User chose to skip
+                                         Swal.fire({
+                                             icon: 'info',
+                                             title: 'Skipped',
+                                             text: 'Event saved. Reward config remains unchanged.',
+                                             background: '#1e293b',
+                                             color: '#fff',
+                                             timer: 2000
+                                         });
+                                     }
+                                     return; // Exit reward handling
+                                 }
+                                 throw fetchErr;
+                             }
+                         } else {
+                             throw createErr;
+                         }
+                     }
                  }
-             } catch (rewErr) {
+                 console.log("✅ Reward config saved successfully");
+             } catch (rewErr: any) {
                  console.error("Failed to save reward config:", rewErr);
-                 Swal.fire({ icon: 'warning', title: 'Reward Save Failed', text: `บันทึกรางวัลไม่สำเร็จ` });
+                 console.error("Response data:", rewErr.response?.data);
+                 console.error("Payload sent:", rewardConfigPayload);
+                 
+                 let msg = 'บันทึกรางวัลไม่สำเร็จ';
+                 if (rewErr.response?.data?.detail) {
+                     if (Array.isArray(rewErr.response.data.detail)) {
+                         // Log each validation error
+                         console.error("Validation Errors:");
+                         rewErr.response.data.detail.forEach((e: any, idx: number) => {
+                             console.error(`  ${idx + 1}. Field: ${e.loc?.join(' → ')}`);
+                             console.error(`     Error: ${e.msg}`);
+                             console.error(`     Type: ${e.type}`);
+                         });
+                         
+                         // Format for display
+                         msg = 'Validation Errors:\n\n' + rewErr.response.data.detail.map((e: any, idx: number) => 
+                             `${idx + 1}. ${e.loc?.join(' → ')}\n   ${e.msg}`
+                         ).join('\n\n');
+                     } else {
+                         msg = rewErr.response.data.detail;
+                     }
+                 }
+                 
+                 Swal.fire({ 
+                   icon: 'error', 
+                   title: 'Reward Save Failed', 
+                   html: `<pre style="text-align: left; font-size: 0.85em; max-height: 400px; overflow-y: auto;">${msg}</pre>`,
+                   background: '#1e293b',
+                   color: '#fff',
+                   confirmButtonColor: '#ef4444',
+                   width: '600px'
+                 });
              }
          }
       }
-
-      // 4. Holiday Logic
-      if (formData.eventType === 'multi_day' && targetId && formData.holidayType !== 'none') {
-        let holidayDates: string[] = [];
-        let holidayNames: string[] = [];
-
-        if (formData.holidayType === 'weekends') {
-          holidayDates = getWeekendDates(startDateStr, endDateStr);
-          holidayNames = holidayDates.map(d => "Weekend Holiday");
-        } else if (formData.holidayType === 'specific') {
-          holidayDates = formData.specificDates;
-          holidayNames = formData.specificDates.map(() => "Specific Holiday");
-        }
-
-        if (holidayDates.length > 0) {
-          try {
-            await api.post(`/api/events/${targetId}/holidays/quick`, {
-              holiday_dates: holidayDates,
-              holiday_names: holidayNames
-            });
-          } catch (hErr) { console.warn("Failed to add holidays:", hErr); }
-        }
-      }
       
-      await Swal.fire({ title: lang.success, text: editingEventId ? lang.eventUpdated : lang.eventCreated, icon: 'success', background: '#1e293b', color: '#fff', confirmButtonColor: '#10b981', timer: 1500, showConfirmButton: false });
+      await Swal.fire({ 
+        title: lang.success, 
+        text: editingEventId ? lang.eventUpdated : lang.eventCreated, 
+        icon: 'success', 
+        background: '#1e293b', 
+        color: '#fff', 
+        confirmButtonColor: '#10b981', 
+        timer: 1500, 
+        showConfirmButton: false 
+      });
       goto('/organizer/events');
-    } catch (error) {
-      console.error('Error:', error);
-      Swal.fire({ title: lang.error, text: 'Failed to save event', icon: 'error', background: '#1e293b', color: '#fff', confirmButtonColor: '#10b981' });
+    } catch (error: any) {
+      console.error('Submit Error:', error);
+      const errMsg = error.response?.data?.detail || error.response?.data?.message || error.message || 'Unknown error';
+      Swal.fire({ 
+        title: lang.error, 
+        text: `Failed to save: ${errMsg}`, 
+        icon: 'error', 
+        background: '#1e293b', 
+        color: '#fff', 
+        confirmButtonColor: '#10b981' 
+      });
     }
   }
   
@@ -502,6 +988,7 @@
     </div>
 
     <div class="ce-grid-layout">
+      <!-- Image Upload Card -->
       <div class="ce-card ce-img-card" class:has-img={formData.imagePreview} on:click|stopPropagation={triggerFileInput}>
         <input type="file" accept="image/*" bind:this={fileInput} on:change={handleImageUpload} hidden />
         {#if formData.imagePreview}
@@ -512,6 +999,7 @@
         {/if}
       </div>
 
+      <!-- Basic Info Card -->
       <div class="ce-card ce-form-card">
         <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg><span>{lang.basicInformation}</span></div>
         <div class="ce-input-group"><label for="title">{lang.eventName} <span class="ce-req">*</span></label><input id="title" type="text" bind:value={formData.title} placeholder="ชื่อกิจกรรม" class="ce-input" class:error={validationErrors.has("title")} /></div>
@@ -519,14 +1007,15 @@
         <div class="ce-input-group"><label for="location">{lang.location} <span class="ce-req">*</span></label><input id="location" type="text" bind:value={formData.location} placeholder="สถานที่" class="ce-input" class:error={validationErrors.has("location")} /></div>
       </div>
 
+      <!-- Event Type Card -->
       <div class="ce-card ce-config-card">
-         <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2zM9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg><span>{lang.eventTypeTitle}</span></div>
+         <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9"></path></svg><span>{lang.eventTypeTitle}</span></div>
          <div class="ce-event-type-buttons">
           <button type="button" class="ce-event-type-btn" class:active={formData.eventType === "single_day"} on:click={() => setEventType("single_day")}>
-            <div class="ce-event-type-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg></div><div class="ce-event-type-content"><span class="ce-event-type-title">{lang.singleDay}</span><span class="ce-event-type-desc">{lang.singleDayDesc}</span></div>{#if formData.eventType === "single_day"}<div class="ce-event-type-check"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg></div>{/if}
+            <div class="ce-event-type-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path><circle cx="12" cy="15" r="2" fill="currentColor"/></svg></div><div class="ce-event-type-content"><span class="ce-event-type-title">{lang.singleDay}</span><span class="ce-event-type-desc">{lang.singleDayDesc}</span></div>{#if formData.eventType === "single_day"}<div class="ce-event-type-check"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg></div>{/if}
           </button>
           <button type="button" class="ce-event-type-btn" class:active={formData.eventType === "multi_day"} on:click={() => setEventType("multi_day")}>
-            <div class="ce-event-type-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2zM9 12h.01M15 12h.01M9 16h.01M15 16h.01"></path></svg></div><div class="ce-event-type-content"><span class="ce-event-type-title">{lang.multiDay}</span><span class="ce-event-type-desc">{lang.multiDayDesc}</span></div>{#if formData.eventType === "multi_day"}<div class="ce-event-type-check"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg></div>{/if}
+            <div class="ce-event-type-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 13h2m2 0h2m2 0h2M7 16h2m2 0h2m2 0h2" stroke="currentColor" opacity="0.6"/></svg></div><div class="ce-event-type-content"><span class="ce-event-type-title">{lang.multiDay}</span><span class="ce-event-type-desc">{lang.multiDayDesc}</span></div>{#if formData.eventType === "multi_day"}<div class="ce-event-type-check"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg></div>{/if}
           </button>
         </div>
         {#if formData.eventType === "multi_day"}
@@ -534,24 +1023,37 @@
         {/if}
       </div>
 
+      <!-- Date & Time Card -->
       <div class="ce-card ce-config-card">
         <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg><span>{lang.dateAndTime}</span></div>
         <div class="ce-input-group"><label>{lang.startDateLabel} <span class="ce-req">*</span></label><div class="ce-date-row" class:error={validationErrors.has("startDate")}><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("sDay")}><input type="text" value={formData.sDay} placeholder={lang.dayPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "sDay"}<div class="ce-options" on:click|stopPropagation>{#each days as d}<button class="ce-opt" on:click|stopPropagation={() => selectOption("sDay", d)}>{d}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-2"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("sMonth")}><input type="text" value={translateMonth(formData.sMonth)} placeholder={lang.monthPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "sMonth"}<div class="ce-options" on:click|stopPropagation>{#each months as m, idx}<button class="ce-opt" on:click|stopPropagation={() => selectOption("sMonth", m)}>{displayMonths[idx]}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("sYear")}><input type="text" value={formData.sYear} placeholder={lang.yearPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "sYear"}<div class="ce-options" on:click|stopPropagation>{#each years as y}<button class="ce-opt" on:click|stopPropagation={() => selectOption("sYear", y)}>{y}</button>{/each}</div>{/if}</div></div></div>
-        <div class="ce-input-group"><label>{lang.endDateLabel} <span class="ce-req">*</span></label><div class="ce-date-row" class:error={validationErrors.has("endDate")}><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("eDay")}><input type="text" value={formData.eDay} placeholder={lang.dayPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "eDay"}<div class="ce-options" on:click|stopPropagation>{#each days as d}<button class="ce-opt" on:click|stopPropagation={() => selectOption("eDay", d)}>{d}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-2"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("eMonth")}><input type="text" value={translateMonth(formData.eMonth)} placeholder={lang.monthPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "eMonth"}<div class="ce-options" on:click|stopPropagation>{#each months as m, idx}<button class="ce-opt" on:click|stopPropagation={() => selectOption("eMonth", m)}>{displayMonths[idx]}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("eYear")}><input type="text" value={formData.eYear} placeholder={lang.yearPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "eYear"}<div class="ce-options" on:click|stopPropagation>{#each years as y}<button class="ce-opt" on:click|stopPropagation={() => selectOption("eYear", y)}>{y}</button>{/each}</div>{/if}</div></div></div>
+        <div class="ce-input-group"><label>{lang.endDateLabel} <span class="ce-req">*</span></label>
+        {#if formData.eventType === "single_day"}
+          <div class="ce-input-group">
+            <input type="text" value={`${formData.eDay} ${translateMonth(formData.eMonth)} ${formData.eYear}`} class="ce-input-dis" disabled style="background: rgba(15, 23, 42, 0.3); cursor: not-allowed;" />
+            <div class="ce-helper-text">📌 วันเดียว: วันสิ้นสุด = วันเริ่มต้น (ปรับอัตโนมัติ)</div>
+          </div>
+        {:else}
+          <div class="ce-date-row" class:error={validationErrors.has("endDate")}><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("eDay")}><input type="text" value={formData.eDay} placeholder={lang.dayPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "eDay"}<div class="ce-options" on:click|stopPropagation>{#each days as d}<button class="ce-opt" on:click|stopPropagation={() => selectOption("eDay", d)}>{d}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-2"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("eMonth")}><input type="text" value={translateMonth(formData.eMonth)} placeholder={lang.monthPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "eMonth"}<div class="ce-options" on:click|stopPropagation>{#each months as m, idx}<button class="ce-opt" on:click|stopPropagation={() => selectOption("eMonth", m)}>{displayMonths[idx]}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("eYear")}><input type="text" value={formData.eYear} placeholder={lang.yearPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "eYear"}<div class="ce-options" on:click|stopPropagation>{#each years as y}<button class="ce-opt" on:click|stopPropagation={() => selectOption("eYear", y)}>{y}</button>{/each}</div>{/if}</div></div>
+        {/if}
+        </div>
         <div class="ce-dual-row"><div class="ce-input-group"><label>{lang.startTimeLabel} <span class="ce-req">*</span></label><div class="ce-dd-wrap"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("startTime")}><input type="text" value={formData.startTime} placeholder={lang.selectTime} class="ce-input-dis" class:error={validationErrors.has("startTime")} readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "startTime"}<div class="ce-options time-scroll" on:click|stopPropagation>{#each times as t}<button class="ce-opt" on:click|stopPropagation={() => selectOption("startTime", t)}>{t}</button>{/each}</div>{/if}</div></div><div class="ce-input-group"><label>{lang.endTimeLabel} <span class="ce-req">*</span></label><div class="ce-dd-wrap"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("endTime")}><input type="text" value={formData.endTime} placeholder={lang.selectTime} class="ce-input-dis" class:error={validationErrors.has("endTime")} readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "endTime"}<div class="ce-options time-scroll" on:click|stopPropagation>{#each times as t}<button class="ce-opt" on:click|stopPropagation={() => selectOption("endTime", t)}>{t}</button>{/each}</div>{/if}</div></div></div>
       </div>
 
+      <!-- Capacity Card -->
       <div class="ce-card ce-config-card">
         <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg><span>{lang.capacityAndSettings}</span></div>
         <div class="ce-dual-row"><div class="ce-input-group"><label>{lang.capacityLabel} <span class="ce-req">*</span></label><input type="number" bind:value={formData.totalSlots} placeholder="100" class="ce-input" class:error={validationErrors.has("totalSlots")} min="1" /></div><div class="ce-input-group"><label>{lang.distanceLabel}</label><input type="number" bind:value={formData.distanceKm} placeholder="5.0" class="ce-input" min="0" step="0.1" /></div></div>
       </div>
 
+      <!-- Holidays Card (Multi-day only) -->
+      {#if formData.eventType === "multi_day"}
       <div class="ce-card ce-config-card">
         <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg><span>{lang.holidaysAndExclusions}</span></div>
         <div class="ce-holiday-options">
-          <label class="ce-radio-option"><input type="radio" bind:group={formData.holidayType} value="none" /><span>{lang.noHolidaysOption}</span></label>
-          <label class="ce-radio-option"><input type="radio" bind:group={formData.holidayType} value="weekends" /><span>{lang.excludeWeekendsOption}</span></label>
-          <label class="ce-radio-option"><input type="radio" bind:group={formData.holidayType} value="specific" /><span>{lang.specificDatesOption}</span></label>
+          <label class="ce-radio-option"><input type="radio" bind:group={formData.holidayType} value="none" on:change={() => { if (formData.eventType === 'multi_day') setTimeout(() => calculateMaxCheckins(), 50); }} /><span>{lang.noHolidaysOption}</span></label>
+          <label class="ce-radio-option"><input type="radio" bind:group={formData.holidayType} value="weekends" on:change={() => { if (formData.eventType === 'multi_day') setTimeout(() => calculateMaxCheckins(), 50); }} /><span>{lang.excludeWeekendsOption}</span></label>
+          <label class="ce-radio-option"><input type="radio" bind:group={formData.holidayType} value="specific" on:change={() => { if (formData.eventType === 'multi_day') setTimeout(() => calculateMaxCheckins(), 50); }} /><span>{lang.specificDatesOption}</span></label>
         </div>
 
         {#if formData.holidayType === "specific"}
@@ -598,30 +1100,67 @@
           </div>
         {/if}
       </div>
+      {/if}
 
+      <!-- Rewards Card -->
       <div class="ce-card ce-config-card">
         <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"></path></svg><span>{lang.rewardsDistribution}</span></div>
-        <div class="ce-input-group"><label>{lang.totalRewardsLabel}</label><input type="number" bind:value={formData.totalRewards} placeholder="100" class="ce-input" min="1" /></div>
+        
+        <div class="ce-reward-explanation">
+          <svg class="ce-info-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          <div class="ce-explanation-text">
+            <strong>วิธีการแจกรางวัล:</strong> ระบบจะรวมผู้เข้าร่วมทั้งหมดมาเรียงลำดับตามจำนวนรอบที่วิ่งได้ 
+            ผู้ที่วิ่งได้มากกว่าจะได้รับรางวัลที่ดีกว่า โดยจำกัดรางวัลตามจำนวนที่กำหนด 
+            <em>(ถึงแม้จะผ่านเกณฑ์ แต่ถ้าไม่ติดอันดับก็จะไม่ได้รับรางวัล)</em>
+          </div>
+        </div>
+
+        <div class="ce-input-group">
+          <label>{lang.totalRewardsLabel}</label>
+          <input type="number" bind:value={formData.totalRewards} placeholder="300" class="ce-input" min="1" />
+          <div class="ce-helper-text">จำนวนคนทั้งหมดที่จะได้รับรางวัล (เช่น 300 คนแรก)</div>
+        </div>
+
+        <div class="ce-tier-divider">
+          <span>ระดับรางวัล (เรียงจากยากไปง่าย)</span>
+        </div>
+
         {#each formData.rewardTiers as tier, idx}
           <div class="ce-reward-tier">
-            <div class="ce-tier-header"><span class="ce-tier-label">{lang.tierLabel} {idx + 1}</span>{#if formData.rewardTiers.length > 1}<button type="button" class="ce-btn-remove-tier" on:click={() => removeRewardTier(idx)}>×</button>{/if}</div>
-            <div class="ce-dual-row">
-                <div class="ce-input-group"><label>{lang.tierNameLabel}</label><input type="text" bind:value={tier.tier_name} placeholder="Gold" class="ce-input" /></div>
-                <div class="ce-input-group"><label>{lang.rewardNameLabel}</label><input type="text" bind:value={tier.reward_name} placeholder="T-Shirt" class="ce-input" /></div>
+            <div class="ce-tier-header">
+              <span class="ce-tier-label">{lang.tierLabel} {idx + 1}</span>
+              {#if formData.rewardTiers.length > 1}
+                <button type="button" class="ce-btn-remove-tier" on:click={() => removeRewardTier(idx)}>×</button>
+              {/if}
             </div>
-            <div class="ce-input-group"><label>{lang.requirementLabel}</label><input type="number" bind:value={tier.min_runs} placeholder="10" class="ce-input" min="1" /></div>
+            <div class="ce-dual-row">
+              <div class="ce-input-group">
+                <label>{lang.rewardNameLabel}</label>
+                <input type="text" bind:value={tier.reward_name} placeholder="เหรียญทอง, เสื้อยืด" class="ce-input" />
+              </div>
+              <div class="ce-input-group">
+                <label>{lang.requirementLabel}</label>
+                <input type="number" bind:value={tier.required_completions} placeholder="10" class="ce-input" min="1" />
+              </div>
+            </div>
+            <div class="ce-tier-hint">
+              💡 ผู้ที่วิ่งครบ <strong>{tier.required_completions || 0} รอบ</strong> และอยู่ใน <strong>{formData.totalRewards || 0} คนแรก</strong> จะได้รับ "{tier.reward_name || 'รางวัล'}"
+            </div>
           </div>
         {/each}
         <button type="button" class="ce-btn-add-tier" on:click={addRewardTier}>{lang.addTierBtn}</button>
       </div>
 
+      <!-- Status Card - Only show when editing -->
+      {#if editingEventId}
       <div class="ce-card ce-config-card">
-        <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path></svg><span>{lang.eventStatusTitle}</span></div>
+        <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg><span>{lang.eventStatusTitle}</span></div>
         <div class="ce-toggle-group">
           <label class="ce-toggle-item"><span>{lang.publicVisibility}</span><label class="ce-toggle-switch"><input type="checkbox" bind:checked={formData.isPublic} /><span class="ce-slider"></span></label></label>
           <label class="ce-toggle-item"><span>{lang.activeOpen}</span><label class="ce-toggle-switch"><input type="checkbox" bind:checked={formData.isActive} /><span class="ce-slider"></span></label></label>
         </div>
       </div>
+      {/if}
     </div>
   </div>
 </div>
@@ -660,6 +1199,16 @@
   .ce-input-group { margin-bottom: 1.25rem; }
   .ce-input-group:last-child { margin-bottom: 0; }
   .ce-input-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--ce-text); font-size: 0.95rem; }
+  .ce-helper-text { margin-top: 0.5rem; font-size: 0.85rem; color: var(--ce-text-muted); font-style: italic; }
+  .ce-reward-explanation { padding: 1rem; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 12px; margin-bottom: 1.5rem; display: flex; gap: 0.75rem; align-items: flex-start; }
+  .ce-info-icon { width: 24px; height: 24px; color: var(--ce-primary); flex-shrink: 0; margin-top: 0.125rem; }
+  .ce-explanation-text { flex: 1; font-size: 0.9rem; color: var(--ce-text); line-height: 1.6; }
+  .ce-explanation-text strong { color: var(--ce-primary); }
+  .ce-explanation-text em { color: var(--ce-text-muted); font-style: italic; }
+  .ce-tier-divider { margin: 1.5rem 0 1rem; padding-bottom: 0.5rem; border-bottom: 2px solid var(--ce-border); }
+  .ce-tier-divider span { font-weight: 600; color: var(--ce-text); font-size: 1rem; }
+  .ce-tier-hint { margin-top: 0.75rem; padding: 0.75rem; background: rgba(245, 158, 11, 0.1); border-left: 3px solid var(--ce-warning); border-radius: 6px; font-size: 0.85rem; color: var(--ce-text-muted); line-height: 1.5; }
+  .ce-tier-hint strong { color: var(--ce-text); }
   .ce-req { color: var(--ce-danger); }
   .ce-input, .ce-textarea, .ce-input-dis { width: 100%; padding: 0.75rem 1rem; background: rgba(15, 23, 42, 0.5); border: 1px solid var(--ce-border); border-radius: 12px; color: var(--ce-text); font-size: 0.95rem; transition: all 0.2s; }
   .ce-input:focus, .ce-textarea:focus { outline: none; border-color: var(--ce-primary); background: rgba(15, 23, 42, 0.7); }
