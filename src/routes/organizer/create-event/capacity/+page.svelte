@@ -5,9 +5,13 @@
   import { t } from '../../_lib/i18n';
   import { onMount } from 'svelte';
   
+  // [สำคัญ] Import ข้อมูลวันหยุด
+  import holidaysData from '$lib/data/holidays.json'; 
+
   $: lang = $appState.currentLang;
   
   let ce_activeDropdown: string | null = null;
+  
   let ce_formData = {
     sDay: '',
     sMonth: '',
@@ -20,7 +24,8 @@
     totalSlots: null as number | null,
     distanceKm: null as number | null,
     holidays: [] as string[],
-    holidayMode: null as 'weekends' | 'specific' | 'none' | null
+    // เพิ่ม Type ให้ครบ
+    holidayMode: null as 'weekends' | 'specific' | 'none' | 'public' | 'weekends_public' | null
   };
   
   let ce_validationErrors = new Set<string>();
@@ -31,30 +36,67 @@
   const ce_displayMonths = lang === 'th' 
     ? ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
     : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const ce_years = Array.from({ length: 10 }, (_, i) => new Date().getFullYear() + i);
+  
+  // ปรับปีเริ่มต้นเป็นปีปัจจุบัน
+  const currentYear = new Date().getFullYear();
+  const ce_years = Array.from({ length: 10 }, (_, i) => currentYear + i);
   
   const ce_timeList = Array.from({ length: 48 }, (_, i) => {
     const h = Math.floor(i / 2);
     const m = i % 2 === 0 ? '00' : '30';
     return `${h.toString().padStart(2, '0')}:${m}`;
   });
-  
+
   onMount(() => {
     const storeData = $eventForm as any;
+    // โหลดข้อมูลเดิมถ้ามี
     if (storeData.sDay) {
       ce_formData = { ...storeData };
     }
-    checkDateRange();
+    // ตรวจสอบช่วงเวลาแต่ยังไม่ต้องคำนวณวันหยุดใหม่ทันทีเพื่อรักษาค่าเดิมไว้
+    validateDateRangeOnly();
   });
-  
-  function checkDateRange() {
+
+  // Helper: แปลงวันที่เป็น String YYYY-MM-DD เพื่อเทียบกับ JSON
+  function formatDateKey(day: string | number, month: string, year: string | number): string {
+    const d = String(day).padStart(2, '0');
+    const m = String(month).padStart(2, '0');
+    const y = String(year);
+    return `${y}-${m}-${d}`;
+  }
+
+  // ฟังก์ชันคำนวณวันหยุดราชการ (ใช้ String Comparison แม่นยำกว่า)
+  function calculatePublicHolidays() {
+    if (!isDateRangeValid) return [];
+    
+    const startStr = formatDateKey(ce_formData.sDay, ce_formData.sMonth, ce_formData.sYear);
+    const endStr = formatDateKey(ce_formData.eDay, ce_formData.eMonth, ce_formData.eYear);
+
+    // กรองวันหยุดจาก JSON ที่อยู่ในช่วงเวลา (รวมวันเริ่มและวันสิ้นสุด)
+    return holidaysData
+        .filter((h: any) => h.date >= startStr && h.date <= endStr)
+        .map((h: any) => h.date);
+  }
+
+  function validateDateRangeOnly() {
     if (ce_formData.sDay && ce_formData.sMonth && ce_formData.sYear && 
         ce_formData.eDay && ce_formData.eMonth && ce_formData.eYear) {
-      const start = new Date(`${ce_formData.sYear}-${ce_formData.sMonth}-${ce_formData.sDay}`);
-      const end = new Date(`${ce_formData.eYear}-${ce_formData.eMonth}-${ce_formData.eDay}`);
-      isDateRangeValid = start <= end;
+      const startStr = formatDateKey(ce_formData.sDay, ce_formData.sMonth, ce_formData.sYear);
+      const endStr = formatDateKey(ce_formData.eDay, ce_formData.eMonth, ce_formData.eYear);
+      isDateRangeValid = startStr <= endStr;
     } else {
       isDateRangeValid = false;
+    }
+  }
+
+  function checkDateRangeAndRefreshHolidays() {
+    validateDateRangeOnly();
+
+    // ถ้าช่วงเวลาถูกต้อง และกำลังเลือกโหมดวันหยุดราชการอยู่ ให้คำนวณวันหยุดใหม่
+    if (isDateRangeValid && (ce_formData.holidayMode === 'public' || ce_formData.holidayMode === 'weekends_public')) {
+        const newHolidays = calculatePublicHolidays();
+        ce_formData.holidays = newHolidays;
+        ce_formData = { ...ce_formData }; // Force Svelte update
     }
   }
   
@@ -65,7 +107,7 @@
   function ce_selectOpt(field: string, value: any) {
     (ce_formData as any)[field] = String(value);
     ce_activeDropdown = null;
-    checkDateRange();
+    checkDateRangeAndRefreshHolidays(); // เปลี่ยนวันที่ -> คำนวณวันหยุดใหม่
   }
   
   function ce_selectCombo(field: string, value: any) {
@@ -73,15 +115,33 @@
     ce_activeDropdown = null;
   }
   
-  function ce_setHolidayMode(mode: 'weekends' | 'specific' | 'none' | null) {
+  // Logic การเลือกโหมดวันหยุด
+  function ce_setHolidayMode(mode: 'weekends' | 'specific' | 'none' | 'public' | 'weekends_public' | null) {
     if (ce_formData.holidayMode === mode) {
-      ce_formData.holidayMode = null;
+      // กรณีกดซ้ำเพื่อยกเลิก (ให้กลับไปเป็น none หรือ specific)
+      ce_formData.holidayMode = 'none';
+      ce_formData.holidays = [];
     } else {
       ce_formData.holidayMode = mode;
-      if (mode !== 'specific') {
-        ce_formData.holidays = [];
+      
+      if (mode === 'public' || mode === 'weekends_public') {
+         // ดึงข้อมูลวันหยุดทันที
+         const found = calculatePublicHolidays();
+         ce_formData.holidays = found;
+         
+         if (found.length === 0) {
+             console.log('No public holidays found in range:', 
+                formatDateKey(ce_formData.sDay, ce_formData.sMonth, ce_formData.sYear), 
+                'to', 
+                formatDateKey(ce_formData.eDay, ce_formData.eMonth, ce_formData.eYear)
+             );
+         }
+      } else {
+         // โหมดอื่นๆ เคลียร์วันหยุด (Specific ต้องกดเพิ่มเอง)
+         ce_formData.holidays = [];
       }
     }
+    ce_formData = { ...ce_formData }; // Force Update UI
   }
   
   function ce_toggleHoliday(date: string) {
@@ -92,6 +152,7 @@
       ce_formData.holidays.push(date);
     }
     ce_formData.holidays = [...ce_formData.holidays];
+    ce_formData = { ...ce_formData };
   }
   
   function translateMonth(month: string) {
@@ -101,13 +162,8 @@
   
   function validateForm(): boolean {
     ce_validationErrors.clear();
-    
-    if (!ce_formData.sDay || !ce_formData.sMonth || !ce_formData.sYear) {
-      ce_validationErrors.add('startDate');
-    }
-    if (!ce_formData.eDay || !ce_formData.eMonth || !ce_formData.eYear) {
-      ce_validationErrors.add('endDate');
-    }
+    if (!ce_formData.sDay || !ce_formData.sMonth || !ce_formData.sYear) ce_validationErrors.add('startDate');
+    if (!ce_formData.eDay || !ce_formData.eMonth || !ce_formData.eYear) ce_validationErrors.add('endDate');
     if (!ce_formData.startTime) ce_validationErrors.add('startTime');
     if (!ce_formData.endTime) ce_validationErrors.add('endTime');
     if (!ce_formData.totalSlots) ce_validationErrors.add('totalSlots');
@@ -117,10 +173,8 @@
   }
   
   function handleNext() {
-    if (!validateForm()) {
-      return;
-    }
-    
+    if (!validateForm()) return;
+    // บันทึกข้อมูลลง Store ก่อนเปลี่ยนหน้า
     eventForm.set({ ...$eventForm, ...ce_formData } as any);
     goto('/organizer/create-event/rewards');
   }
@@ -131,13 +185,10 @@
   }
   
   function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      ce_activeDropdown = null;
-    }
+    if (e.key === 'Escape') ce_activeDropdown = null;
   }
 </script>
 
-<!-- svelte-ignore a11y-no-static-element-interactions -->
 <div 
   class="ce-scroll-container"
   on:click={() => (ce_activeDropdown = null)}
@@ -145,7 +196,6 @@
   role="presentation"
 >
   <div class="ce-grid-layout">
-    <!-- Date & Time Card -->
     <div class="ce-card ce-config-card">
       <div class="ce-card-head">
         <svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -155,73 +205,48 @@
       </div>
 
       <div class="ce-dual-row">
-        <!-- Start Date -->
         <div class="ce-input-group">
           <div class="ce-label-wrapper">
             <span class="ce-label">{t('startDateLabel')} <span class="ce-req">*</span></span>
           </div>
           <div class="ce-date-row compact-gap" class:error={ce_validationErrors.has('startDate')}>
-            <!-- Day -->
             <div class="ce-dd-wrap flex-1-5">
-              <button 
-                type="button"
-                class="ce-trigger" 
-                on:click|stopPropagation={() => ce_toggleDD('sDay')}
-                aria-label={lang === 'th' ? 'เลือกวัน' : 'Select day'}
-                aria-expanded={ce_activeDropdown === 'sDay'}
-              >
-                <input type="text" value={ce_formData.sDay} placeholder={lang === 'th' ? 'วัน' : 'Day'} class="ce-input-dis" readonly tabindex="-1" aria-hidden="true" />
-                <span class="ce-arrow" aria-hidden="true">▼</span>
+              <button type="button" class="ce-trigger" on:click|stopPropagation={() => ce_toggleDD('sDay')}>
+                <input type="text" value={ce_formData.sDay} placeholder={lang === 'th' ? 'วัน' : 'Day'} class="ce-input-dis" readonly />
+                <span class="ce-arrow">▼</span>
               </button>
               {#if ce_activeDropdown === 'sDay'}
-                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <div class="ce-options" on:click|stopPropagation role="listbox" aria-label="Days">
+                <div class="ce-options">
                   {#each ce_days as d}
-                    <button type="button" class="ce-opt" role="option" on:click|stopPropagation={() => ce_selectOpt('sDay', d)}>{d}</button>
+                    <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('sDay', d)}>{d}</button>
                   {/each}
                 </div>
               {/if}
             </div>
 
-            <!-- Month -->
             <div class="ce-dd-wrap flex-2">
-              <button 
-                type="button"
-                class="ce-trigger" 
-                on:click|stopPropagation={() => ce_toggleDD('sMonth')}
-                aria-label={lang === 'th' ? 'เลือกเดือน' : 'Select month'}
-                aria-expanded={ce_activeDropdown === 'sMonth'}
-              >
-                <input type="text" value={translateMonth(ce_formData.sMonth)} placeholder={lang === 'th' ? 'เดือน' : 'Month'} class="ce-input-dis" readonly tabindex="-1" aria-hidden="true" />
-                <span class="ce-arrow" aria-hidden="true">▼</span>
+              <button type="button" class="ce-trigger" on:click|stopPropagation={() => ce_toggleDD('sMonth')}>
+                <input type="text" value={translateMonth(ce_formData.sMonth)} placeholder={lang === 'th' ? 'เดือน' : 'Month'} class="ce-input-dis" readonly />
+                <span class="ce-arrow">▼</span>
               </button>
               {#if ce_activeDropdown === 'sMonth'}
-                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <div class="ce-options" on:click|stopPropagation role="listbox" aria-label="Months">
+                <div class="ce-options">
                   {#each ce_months as m, idx}
-                    <button type="button" class="ce-opt" role="option" on:click|stopPropagation={() => ce_selectOpt('sMonth', m)}>{ce_displayMonths[idx]}</button>
+                    <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('sMonth', m)}>{ce_displayMonths[idx]}</button>
                   {/each}
                 </div>
               {/if}
             </div>
 
-            <!-- Year -->
             <div class="ce-dd-wrap flex-1-5">
-              <button 
-                type="button"
-                class="ce-trigger" 
-                on:click|stopPropagation={() => ce_toggleDD('sYear')}
-                aria-label={lang === 'th' ? 'เลือกปี' : 'Select year'}
-                aria-expanded={ce_activeDropdown === 'sYear'}
-              >
-                <input type="text" value={ce_formData.sYear} placeholder={lang === 'th' ? 'ปี' : 'Year'} class="ce-input-dis" readonly tabindex="-1" aria-hidden="true" />
-                <span class="ce-arrow" aria-hidden="true">▼</span>
+              <button type="button" class="ce-trigger" on:click|stopPropagation={() => ce_toggleDD('sYear')}>
+                <input type="text" value={ce_formData.sYear} placeholder={lang === 'th' ? 'ปี' : 'Year'} class="ce-input-dis" readonly />
+                <span class="ce-arrow">▼</span>
               </button>
               {#if ce_activeDropdown === 'sYear'}
-                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <div class="ce-options" on:click|stopPropagation role="listbox" aria-label="Years">
+                <div class="ce-options">
                   {#each ce_years as y}
-                    <button type="button" class="ce-opt" role="option" on:click|stopPropagation={() => ce_selectOpt('sYear', y)}>{y}</button>
+                    <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('sYear', y)}>{y}</button>
                   {/each}
                 </div>
               {/if}
@@ -229,73 +254,48 @@
           </div>
         </div>
 
-        <!-- End Date -->
         <div class="ce-input-group">
           <div class="ce-label-wrapper">
             <span class="ce-label">{t('endDateLabel')} <span class="ce-req">*</span></span>
           </div>
           <div class="ce-date-row compact-gap" class:error={ce_validationErrors.has('endDate')}>
-            <!-- Day -->
             <div class="ce-dd-wrap flex-1-5">
-              <button 
-                type="button"
-                class="ce-trigger" 
-                on:click|stopPropagation={() => ce_toggleDD('eDay')}
-                aria-label={lang === 'th' ? 'เลือกวันสิ้นสุด' : 'Select end day'}
-                aria-expanded={ce_activeDropdown === 'eDay'}
-              >
-                <input type="text" value={ce_formData.eDay} placeholder={lang === 'th' ? 'วัน' : 'Day'} class="ce-input-dis" readonly tabindex="-1" aria-hidden="true" />
-                <span class="ce-arrow" aria-hidden="true">▼</span>
+              <button type="button" class="ce-trigger" on:click|stopPropagation={() => ce_toggleDD('eDay')}>
+                <input type="text" value={ce_formData.eDay} placeholder={lang === 'th' ? 'วัน' : 'Day'} class="ce-input-dis" readonly />
+                <span class="ce-arrow">▼</span>
               </button>
               {#if ce_activeDropdown === 'eDay'}
-                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <div class="ce-options" on:click|stopPropagation role="listbox" aria-label="End days">
+                <div class="ce-options">
                   {#each ce_days as d}
-                    <button type="button" class="ce-opt" role="option" on:click|stopPropagation={() => ce_selectOpt('eDay', d)}>{d}</button>
+                    <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('eDay', d)}>{d}</button>
                   {/each}
                 </div>
               {/if}
             </div>
 
-            <!-- Month -->
             <div class="ce-dd-wrap flex-2">
-              <button 
-                type="button"
-                class="ce-trigger" 
-                on:click|stopPropagation={() => ce_toggleDD('eMonth')}
-                aria-label={lang === 'th' ? 'เลือกเดือนสิ้นสุด' : 'Select end month'}
-                aria-expanded={ce_activeDropdown === 'eMonth'}
-              >
-                <input type="text" value={translateMonth(ce_formData.eMonth)} placeholder={lang === 'th' ? 'เดือน' : 'Month'} class="ce-input-dis" readonly tabindex="-1" aria-hidden="true" />
-                <span class="ce-arrow" aria-hidden="true">▼</span>
+              <button type="button" class="ce-trigger" on:click|stopPropagation={() => ce_toggleDD('eMonth')}>
+                <input type="text" value={translateMonth(ce_formData.eMonth)} placeholder={lang === 'th' ? 'เดือน' : 'Month'} class="ce-input-dis" readonly />
+                <span class="ce-arrow">▼</span>
               </button>
               {#if ce_activeDropdown === 'eMonth'}
-                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <div class="ce-options" on:click|stopPropagation role="listbox" aria-label="End months">
+                <div class="ce-options">
                   {#each ce_months as m, idx}
-                    <button type="button" class="ce-opt" role="option" on:click|stopPropagation={() => ce_selectOpt('eMonth', m)}>{ce_displayMonths[idx]}</button>
+                    <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('eMonth', m)}>{ce_displayMonths[idx]}</button>
                   {/each}
                 </div>
               {/if}
             </div>
 
-            <!-- Year -->
             <div class="ce-dd-wrap flex-1-5">
-              <button 
-                type="button"
-                class="ce-trigger" 
-                on:click|stopPropagation={() => ce_toggleDD('eYear')}
-                aria-label={lang === 'th' ? 'เลือกปีสิ้นสุด' : 'Select end year'}
-                aria-expanded={ce_activeDropdown === 'eYear'}
-              >
-                <input type="text" value={ce_formData.eYear} placeholder={lang === 'th' ? 'ปี' : 'Year'} class="ce-input-dis" readonly tabindex="-1" aria-hidden="true" />
-                <span class="ce-arrow" aria-hidden="true">▼</span>
+              <button type="button" class="ce-trigger" on:click|stopPropagation={() => ce_toggleDD('eYear')}>
+                <input type="text" value={ce_formData.eYear} placeholder={lang === 'th' ? 'ปี' : 'Year'} class="ce-input-dis" readonly />
+                <span class="ce-arrow">▼</span>
               </button>
               {#if ce_activeDropdown === 'eYear'}
-                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <div class="ce-options" on:click|stopPropagation role="listbox" aria-label="End years">
+                <div class="ce-options">
                   {#each ce_years as y}
-                    <button type="button" class="ce-opt" role="option" on:click|stopPropagation={() => ce_selectOpt('eYear', y)}>{y}</button>
+                    <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('eYear', y)}>{y}</button>
                   {/each}
                 </div>
               {/if}
@@ -308,83 +308,58 @@
         <div class="ce-error-msg" role="alert">⚠️ {t('invalidDateRangeMsg')}</div>
       {/if}
 
-      <!-- Time & Capacity Row -->
       <div class="ce-time-capacity-row">
-        <!-- Start Time -->
         <div class="ce-input-group">
           <div class="ce-label-wrapper">
             <span class="ce-label">{t('startTimeLabel')} <span class="ce-req">*</span></span>
           </div>
           <div class="ce-dd-wrap" class:error={ce_validationErrors.has('startTime')}>
-            <button 
-              type="button"
-              class="ce-trigger-compact" 
-              on:click|stopPropagation={() => ce_toggleDD('startTime')}
-              aria-label={lang === 'th' ? 'เลือกเวลาเริ่ม' : 'Select start time'}
-              aria-expanded={ce_activeDropdown === 'startTime'}
-            >
-              <input type="text" bind:value={ce_formData.startTime} placeholder="00:00" class="ce-input-inline" maxlength="5" aria-label={lang === 'th' ? 'เวลาเริ่ม' : 'Start time'} />
-              <span class="ce-arrow" aria-hidden="true">▼</span>
+            <button type="button" class="ce-trigger-compact" on:click|stopPropagation={() => ce_toggleDD('startTime')}>
+              <input type="text" bind:value={ce_formData.startTime} placeholder="00:00" class="ce-input-inline" maxlength="5" />
+              <span class="ce-arrow">▼</span>
             </button>
             {#if ce_activeDropdown === 'startTime'}
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div class="ce-options" on:click|stopPropagation role="listbox" aria-label="Start times">
+              <div class="ce-options">
                 {#each ce_timeList as t}
-                  <button type="button" class="ce-opt" role="option" on:click|stopPropagation={() => ce_selectCombo('startTime', t)}>{t}</button>
+                  <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectCombo('startTime', t)}>{t}</button>
                 {/each}
               </div>
             {/if}
           </div>
         </div>
 
-        <!-- End Time -->
         <div class="ce-input-group">
           <div class="ce-label-wrapper">
             <span class="ce-label">{t('endTimeLabel')} <span class="ce-req">*</span></span>
           </div>
           <div class="ce-dd-wrap" class:error={ce_validationErrors.has('endTime')}>
-            <button 
-              type="button"
-              class="ce-trigger-compact" 
-              on:click|stopPropagation={() => ce_toggleDD('endTime')}
-              aria-label={lang === 'th' ? 'เลือกเวลาสิ้นสุด' : 'Select end time'}
-              aria-expanded={ce_activeDropdown === 'endTime'}
-            >
-              <input type="text" bind:value={ce_formData.endTime} placeholder="00:00" class="ce-input-inline" maxlength="5" aria-label={lang === 'th' ? 'เวลาสิ้นสุด' : 'End time'} />
-              <span class="ce-arrow" aria-hidden="true">▼</span>
+            <button type="button" class="ce-trigger-compact" on:click|stopPropagation={() => ce_toggleDD('endTime')}>
+              <input type="text" bind:value={ce_formData.endTime} placeholder="00:00" class="ce-input-inline" maxlength="5" />
+              <span class="ce-arrow">▼</span>
             </button>
             {#if ce_activeDropdown === 'endTime'}
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div class="ce-options" on:click|stopPropagation role="listbox" aria-label="End times">
+              <div class="ce-options">
                 {#each ce_timeList as t}
-                  <button type="button" class="ce-opt" role="option" on:click|stopPropagation={() => ce_selectCombo('endTime', t)}>{t}</button>
+                  <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectCombo('endTime', t)}>{t}</button>
                 {/each}
               </div>
             {/if}
           </div>
         </div>
 
-        <!-- Total Slots -->
         <div class="ce-input-group">
           <div class="ce-label-wrapper">
             <span class="ce-label">{t('capacityLabel')} <span class="ce-req">*</span></span>
           </div>
           <div class="ce-dd-wrap" class:error={ce_validationErrors.has('totalSlots')}>
-            <button 
-              type="button"
-              class="ce-trigger-compact" 
-              on:click|stopPropagation={() => ce_toggleDD('slots')}
-              aria-label={lang === 'th' ? 'เลือกจำนวนที่นั่ง' : 'Select capacity'}
-              aria-expanded={ce_activeDropdown === 'slots'}
-            >
-              <input type="number" min="0" bind:value={ce_formData.totalSlots} placeholder={lang === 'th' ? 'สูงสุด' : 'Max'} class="ce-input-inline" aria-label={lang === 'th' ? 'จำนวนที่นั่ง' : 'Capacity'} />
-              <span class="ce-arrow" aria-hidden="true">▼</span>
+            <button type="button" class="ce-trigger-compact" on:click|stopPropagation={() => ce_toggleDD('slots')}>
+              <input type="number" min="0" bind:value={ce_formData.totalSlots} placeholder={lang === 'th' ? 'สูงสุด' : 'Max'} class="ce-input-inline" />
+              <span class="ce-arrow">▼</span>
             </button>
             {#if ce_activeDropdown === 'slots'}
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div class="ce-options" on:click|stopPropagation role="listbox" aria-label="Capacity options">
+              <div class="ce-options">
                 {#each [50, 100, 200, 500, 1000, 2000, 5000] as s}
-                  <button type="button" class="ce-opt" role="option" on:click|stopPropagation={() => ce_selectCombo('totalSlots', s)}>{s} {lang === 'th' ? 'ที่นั่ง' : 'Slots'}</button>
+                  <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectCombo('totalSlots', s)}>{s} {lang === 'th' ? 'ที่นั่ง' : 'Slots'}</button>
                 {/each}
               </div>
             {/if}
@@ -392,28 +367,20 @@
         </div>
       </div>
 
-      <!-- Distance (Optional) -->
       <div class="ce-input-group">
         <div class="ce-label-wrapper">
-          <span class="ce-label">{t('distanceLabel')}</span>
+           <span class="ce-label">{t('distanceLabel')}</span>
         </div>
         <div class="ce-dd-wrap">
-          <button 
-            type="button"
-            class="ce-trigger-compact" 
-            on:click|stopPropagation={() => ce_toggleDD('distanceKm')}
-            aria-label={lang === 'th' ? 'เลือกระยะทาง' : 'Select distance'}
-            aria-expanded={ce_activeDropdown === 'distanceKm'}
-          >
-            <input type="number" min="0" step="1" bind:value={ce_formData.distanceKm} placeholder="0" class="ce-input-inline" aria-label={lang === 'th' ? 'ระยะทาง' : 'Distance'} />
+          <button type="button" class="ce-trigger-compact" on:click|stopPropagation={() => ce_toggleDD('distanceKm')}>
+            <input type="number" min="0" step="1" bind:value={ce_formData.distanceKm} placeholder="0" class="ce-input-inline" />
             <span class="ce-unit-label">km</span>
-            <span class="ce-arrow" aria-hidden="true">▼</span>
+            <span class="ce-arrow">▼</span>
           </button>
           {#if ce_activeDropdown === 'distanceKm'}
-            <!-- svelte-ignore a11y-no-static-element-interactions -->
-            <div class="ce-options" on:click|stopPropagation role="listbox" aria-label="Distance options">
+            <div class="ce-options">
               {#each [1, 2, 3, 5, 10, 15, 21, 42] as d}
-                <button type="button" class="ce-opt" role="option" on:click|stopPropagation={() => ce_selectCombo('distanceKm', d)}>{d} km</button>
+                <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectCombo('distanceKm', d)}>{d} km</button>
               {/each}
             </div>
           {/if}
@@ -421,7 +388,6 @@
       </div>
     </div>
 
-    <!-- Holidays Card -->
     <div class="ce-card ce-config-card" class:ce-locked-card={!isDateRangeValid}>
       {#if !isDateRangeValid}
         <div class="ce-lock-overlay" role="status" aria-live="polite">
@@ -441,19 +407,35 @@
 
       <div class="ce-holiday-control">
         <div class="ce-holiday-buttons">
+          <label class="ce-check-row" class:active={ce_formData.holidayMode === 'none'}>
+            <input type="checkbox" checked={ce_formData.holidayMode === 'none'} disabled={!isDateRangeValid} on:change={() => ce_setHolidayMode('none')} />
+            <div class="ce-check-content">
+              <span class="ce-check-title">{t('noHolidaysOption')}</span>
+              <span class="ce-check-desc">{lang === 'th' ? 'กิจกรรมทุกวัน' : 'Event runs daily'}</span>
+            </div>
+          </label>
+
           <label class="ce-check-row" class:active={ce_formData.holidayMode === 'weekends'}>
-            <input type="checkbox" checked={ce_formData.holidayMode === 'weekends'} disabled={!isDateRangeValid} on:change={() => ce_setHolidayMode('weekends')} aria-label={t('excludeWeekends')} />
+            <input type="checkbox" checked={ce_formData.holidayMode === 'weekends'} disabled={!isDateRangeValid} on:change={() => ce_setHolidayMode('weekends')} />
             <div class="ce-check-content">
               <span class="ce-check-title">{t('excludeWeekends')}</span>
               <span class="ce-check-desc">{lang === 'th' ? 'ไม่นับวันเสาร์-อาทิตย์' : 'Exclude Sat-Sun'}</span>
             </div>
           </label>
-
-          <label class="ce-check-row" class:active={ce_formData.holidayMode === 'none'}>
-            <input type="checkbox" checked={ce_formData.holidayMode === 'none'} disabled={!isDateRangeValid} on:change={() => ce_setHolidayMode('none')} aria-label={t('noHolidaysOption')} />
+          
+          <label class="ce-check-row" class:active={ce_formData.holidayMode === 'public'}>
+            <input type="checkbox" checked={ce_formData.holidayMode === 'public'} disabled={!isDateRangeValid} on:change={() => ce_setHolidayMode('public')} />
             <div class="ce-check-content">
-              <span class="ce-check-title">{t('noHolidaysOption')}</span>
-              <span class="ce-check-desc">{lang === 'th' ? 'กิจกรรมทุกวัน' : 'Event runs daily'}</span>
+              <span class="ce-check-title">{lang === 'th' ? 'วันหยุดราชการ' : 'Public Holidays'}</span>
+              <span class="ce-check-desc">{lang === 'th' ? 'หยุดเฉพาะวันราชการ' : 'Public holidays only'}</span>
+            </div>
+          </label>
+
+          <label class="ce-check-row" class:active={ce_formData.holidayMode === 'weekends_public'}>
+            <input type="checkbox" checked={ce_formData.holidayMode === 'weekends_public'} disabled={!isDateRangeValid} on:change={() => ce_setHolidayMode('weekends_public')} />
+            <div class="ce-check-content">
+              <span class="ce-check-title">{lang === 'th' ? 'เสาร์-อาทิตย์ + ราชการ' : 'Sat-Sun & Public'}</span>
+              <span class="ce-check-desc">{lang === 'th' ? 'หยุดทุกวันหยุด' : 'Exclude all holidays'}</span>
             </div>
           </label>
         </div>
@@ -462,11 +444,15 @@
 
         <div class="ce-input-group">
           <div class="ce-label-wrapper">
-            <span class="ce-label">{lang === 'th' ? 'เพิ่มวันหยุดเฉพาะ' : 'Add Specific Holidays'}</span>
+            <span class="ce-label">{lang === 'th' ? 'วันที่หยุดที่เลือก' : 'Selected Holidays'}</span>
           </div>
           <div class="ce-tags" style="margin-top: 10px;">
             {#if ce_formData.holidays.length === 0}
-              <span style="color: #64748b; font-size: 0.85rem;">{lang === 'th' ? 'ยังไม่มีวันหยุดที่เลือก' : 'No holidays selected'}</span>
+               {#if ce_formData.holidayMode === 'public' || ce_formData.holidayMode === 'weekends_public'}
+                  <span style="color: #64748b; font-size: 0.85rem;">{lang === 'th' ? 'ไม่พบวันหยุดในช่วงเวลานี้ (ตรวจสอบปี)' : 'No holidays found in range'}</span>
+               {:else}
+                  <span style="color: #64748b; font-size: 0.85rem;">{lang === 'th' ? 'ยังไม่มีวันหยุดที่เลือก' : 'No holidays selected'}</span>
+               {/if}
             {:else}
               {#each ce_formData.holidays as h}
                 <span class="ce-tag">
@@ -480,11 +466,10 @@
       </div>
     </div>
 
-    <!-- Navigation Buttons -->
     <div class="ce-nav-buttons">
       <button type="button" class="ce-btn-cancel" on:click={handleBack}>
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
         </svg>
         {t('back')}
       </button>
@@ -499,461 +484,63 @@
 </div>
 
 <style>
-  /* Smooth Scroll Container - No visible scrollbar */
+  /* Scrollbar Settings: ซ่อน Scrollbar แต่ยังเลื่อนได้ */
   .ce-scroll-container {
     height: calc(100vh - 180px);
-    overflow-y: auto;
+    overflow-y: auto; /* อนุญาตให้เลื่อน */
     overflow-x: hidden;
-    
-    /* Hide scrollbar but keep functionality */
-    scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none; /* IE/Edge */
+    scrollbar-width: none !important; /* Firefox */
+    -ms-overflow-style: none !important; /* IE/Edge */
   }
   
   .ce-scroll-container::-webkit-scrollbar {
-    display: none; /* Chrome/Safari/Opera */
+    display: none !important; /* Chrome/Safari */
   }
 
   /* Grid Layout */
-  .ce-grid-layout {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-    max-width: 900px;
-    margin: 0 auto;
-    position: relative;
-    z-index: 10;
-    padding: 0 16px 24px;
-  }
-
-  /* Card Styles */
-  .ce-card {
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 20px;
-    padding: 24px;
-    position: relative;
-    box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.3);
-    overflow: visible;
-  }
-
-  .ce-card-head {
-    font-size: 1.1rem;
-    font-weight: 700;
-    color: #f1f5f9;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    border-bottom: 1px solid #334155;
-    padding-bottom: 15px;
-    margin-bottom: 20px;
-  }
-
-  .ce-icon-svg {
-    width: 20px;
-    height: 20px;
-    flex-shrink: 0;
-    color: #10b981;
-  }
-
-  /* Input Styles */
-  .ce-input-group {
-    margin-bottom: 1.2rem;
-  }
-
-  .ce-input-group:last-child {
-    margin-bottom: 0;
-  }
-
-  .ce-label-wrapper {
-    margin-bottom: 8px;
-  }
-
-  .ce-label {
-    display: block;
-    color: #94a3b8;
-    font-size: 0.85rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .ce-req {
-    color: #ef4444;
-    margin-left: 4px;
-  }
-
-  /* Date & Time Layouts */
-  .ce-dual-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    margin-bottom: 1.5rem;
-  }
-
-  .ce-time-capacity-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 15px;
-    margin-top: 1.5rem;
-  }
-
-  .ce-date-row {
-    display: flex;
-    gap: 10px;
-  }
-
-  .ce-date-row.compact-gap {
-    gap: 6px;
-  }
-
-  .flex-2 { flex: 2; }
-  .flex-1-5 { flex: 1.5; }
-
-  /* Dropdown Wrapper */
-  .ce-dd-wrap {
-    position: relative;
-  }
-
-  .ce-trigger,
-  .ce-trigger-compact {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: #0f172a;
-    border: 1px solid #334155;
-    border-radius: 12px;
-    padding: 0 14px;
-    height: 48px;
-    cursor: pointer;
-    transition: all 0.2s;
-    position: relative;
-    width: 100%;
-    text-align: left;
-  }
-
-  .ce-trigger:hover,
-  .ce-trigger-compact:hover {
-    border-color: #64748b;
-  }
-
-  .ce-input-dis,
-  .ce-input-inline {
-    flex: 1;
-    background: transparent;
-    border: none;
-    color: white;
-    font-size: 0.95rem;
-    outline: none;
-    pointer-events: none;
-  }
-
-  .ce-input-inline {
-    pointer-events: auto;
-  }
-
-  .ce-arrow {
-    color: #64748b;
-    font-size: 0.7rem;
-    pointer-events: none;
-  }
-
-  .ce-unit-label {
-    font-size: 0.85rem;
-    color: #10b981;
-    font-weight: 600;
-    margin-left: 4px;
-    margin-right: 8px;
-    pointer-events: none;
-  }
-
-  .ce-options {
-    position: absolute;
-    top: calc(100% + 8px);
-    left: 0;
-    right: 0;
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 12px;
-    max-height: 300px;
-    overflow-y: auto;
-    z-index: 100;
-    box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
-  }
-
-  .ce-opt {
-    padding: 12px 16px;
-    color: #e2e8f0;
-    cursor: pointer;
-    transition: all 0.2s;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: transparent;
-    border: none;
-    width: 100%;
-    text-align: left;
-  }
-
-  .ce-opt:hover {
-    background: #10b981;
-    color: white;
-  }
-
-  /* Lock Overlay */
-  .ce-locked-card {
-    opacity: 0.5;
-    pointer-events: none;
-    border-style: dashed;
-    border-color: #475569;
-    filter: grayscale(0.8);
-  }
-
-  .ce-lock-overlay {
-    position: absolute;
-    inset: 0;
-    background: rgba(15, 23, 42, 0.85);
-    z-index: 50;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    border-radius: 20px;
-    color: #e2e8f0;
-    font-weight: 500;
-    backdrop-filter: blur(2px);
-    gap: 10px;
-  }
-
-  .ce-lock-icon-svg {
-    width: 48px;
-    height: 48px;
-    color: #64748b;
-    margin-bottom: 10px;
-  }
-
-  /* Holiday Buttons */
-  .ce-holiday-buttons {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-bottom: 20px;
-  }
-
-  .ce-check-row {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-    cursor: pointer;
-    padding: 14px;
-    background: #0f172a;
-    border-radius: 12px;
-    border: 1px solid #334155;
-    transition: 0.2s;
-    user-select: none;
-  }
-
-  .ce-check-row:hover {
-    border-color: #64748b;
-    background: #162032;
-  }
-
-  .ce-check-row.active {
-    border-color: #10b981;
-    background: rgba(16, 185, 129, 0.05);
-  }
-
-  .ce-check-row input {
-    width: 20px;
-    height: 20px;
-    accent-color: #10b981;
-    cursor: pointer;
-  }
-
-  .ce-check-content {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .ce-check-title {
-    color: white;
-    font-weight: 600;
-    font-size: 0.95rem;
-  }
-
-  .ce-check-desc {
-    color: #64748b;
-    font-size: 0.8rem;
-    margin-top: 2px;
-  }
-
-  .ce-divider {
-    border: 0;
-    border-top: 1px solid #334155;
-    margin: 20px 0;
-  }
-
-  .ce-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 15px;
-  }
-
-  .ce-tag {
-    background: rgba(239, 68, 68, 0.15);
-    color: #fca5a5;
-    padding: 6px 12px;
-    border-radius: 20px;
-    font-size: 0.85rem;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border: 1px solid rgba(239, 68, 68, 0.3);
-  }
-
-  .ce-tag button {
-    background: none;
-    border: none;
-    color: inherit;
-    cursor: pointer;
-    font-size: 1.1rem;
-    line-height: 1;
-  }
-
-  .ce-error-msg {
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    color: #fca5a5;
-    padding: 10px 14px;
-    border-radius: 10px;
-    font-size: 0.85rem;
-    margin-top: 15px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  /* Navigation Buttons */
-  .ce-nav-buttons {
-    display: flex;
-    gap: 12px;
-    justify-content: flex-end;
-    position: sticky;
-    bottom: 0;
-    background: linear-gradient(to top, #0f172a 80%, transparent);
-    padding: 20px 0 0;
-    margin: 0 -16px;
-    padding-left: 16px;
-    padding-right: 16px;
-  }
-
-  .ce-btn-cancel {
-    background: transparent;
-    border: 1px solid #475569;
-    color: #94a3b8;
-    padding: 0.7rem 1.5rem;
-    border-radius: 12px;
-    cursor: pointer;
-    font-weight: 600;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .ce-btn-cancel svg {
-    width: 18px;
-    height: 18px;
-  }
-
-  .ce-btn-cancel:hover {
-    border-color: #e2e8f0;
-    color: #e2e8f0;
-  }
-
-  .ce-btn-save {
-    background: linear-gradient(135deg, #10b981, #059669);
-    border: none;
-    color: white;
-    padding: 0.7rem 2rem;
-    border-radius: 12px;
-    font-weight: 700;
-    cursor: pointer;
-    box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .ce-btn-save svg {
-    width: 18px;
-    height: 18px;
-  }
-
-  .ce-btn-save:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
-  }
-
-  /* Responsive - Mobile */
-  @media (max-width: 1024px) {
-    .ce-dual-row {
-      grid-template-columns: 1fr;
-    }
-    .ce-time-capacity-row {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  @media (max-width: 640px) {
-    .ce-scroll-container {
-      height: calc(100vh - 140px);
-    }
-
-    .ce-grid-layout {
-      gap: 16px;
-      padding: 0 12px 16px;
-    }
-
-    .ce-card {
-      padding: 16px;
-      border-radius: 16px;
-    }
-
-    .ce-card-head {
-      font-size: 0.95rem;
-      padding-bottom: 12px;
-      margin-bottom: 16px;
-    }
-
-    .ce-holiday-buttons {
-      grid-template-columns: 1fr;
-    }
-
-    .ce-check-row {
-      padding: 12px;
-    }
-
-    .ce-date-row {
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .ce-date-row.compact-gap {
-      gap: 10px;
-    }
-
-    .ce-nav-buttons {
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .ce-btn-cancel,
-    .ce-btn-save {
-      width: 100%;
-      justify-content: center;
-    }
-  }
+  .ce-grid-layout { display: flex; flex-direction: column; gap: 24px; max-width: 900px; margin: 0 auto; position: relative; z-index: 10; padding: 0 16px 24px; }
+  .ce-card { background: #1e293b; border: 1px solid #334155; border-radius: 20px; padding: 24px; position: relative; box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.3); overflow: visible; }
+  .ce-card-head { font-size: 1.1rem; font-weight: 700; color: #f1f5f9; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #334155; padding-bottom: 15px; margin-bottom: 20px; }
+  .ce-icon-svg { width: 20px; height: 20px; flex-shrink: 0; color: #10b981; }
+  .ce-input-group { margin-bottom: 1.2rem; } .ce-input-group:last-child { margin-bottom: 0; }
+  .ce-label-wrapper { margin-bottom: 8px; } .ce-label { display: block; color: #94a3b8; font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; } .ce-req { color: #ef4444; margin-left: 4px; }
+  .ce-dual-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 1.5rem; }
+  .ce-time-capacity-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-top: 1.5rem; }
+  .ce-date-row { display: flex; gap: 10px; } .ce-date-row.compact-gap { gap: 6px; }
+  .flex-2 { flex: 2; } .flex-1-5 { flex: 1.5; }
+  .ce-dd-wrap { position: relative; }
+  .ce-trigger, .ce-trigger-compact { display: flex; align-items: center; gap: 8px; background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 0 14px; height: 48px; cursor: pointer; transition: all 0.2s; position: relative; width: 100%; text-align: left; }
+  .ce-trigger:hover, .ce-trigger-compact:hover { border-color: #64748b; }
+  .ce-input-dis, .ce-input-inline { flex: 1; background: transparent; border: none; color: white; font-size: 0.95rem; outline: none; pointer-events: none; }
+  .ce-input-inline { pointer-events: auto; }
+  .ce-arrow { color: #64748b; font-size: 0.7rem; pointer-events: none; }
+  .ce-unit-label { font-size: 0.85rem; color: #10b981; font-weight: 600; margin-left: 4px; margin-right: 8px; pointer-events: none; }
+  .ce-options { position: absolute; top: calc(100% + 8px); left: 0; right: 0; background: #1e293b; border: 1px solid #334155; border-radius: 12px; max-height: 300px; overflow-y: auto; z-index: 100; box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5); }
+  .ce-opt { padding: 12px 16px; color: #e2e8f0; cursor: pointer; transition: all 0.2s; display: flex; justify-content: space-between; align-items: center; background: transparent; border: none; width: 100%; text-align: left; }
+  .ce-opt:hover { background: #10b981; color: white; }
+  .ce-locked-card { opacity: 0.5; pointer-events: none; border-style: dashed; border-color: #475569; filter: grayscale(0.8); }
+  .ce-lock-overlay { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.85); z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 20px; color: #e2e8f0; font-weight: 500; backdrop-filter: blur(2px); gap: 10px; }
+  .ce-lock-icon-svg { width: 48px; height: 48px; color: #64748b; margin-bottom: 10px; }
+  
+  /* Holiday Buttons Grid */
+  .ce-holiday-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+  .ce-check-row { display: flex; align-items: center; gap: 15px; cursor: pointer; padding: 14px; background: #0f172a; border-radius: 12px; border: 1px solid #334155; transition: 0.2s; user-select: none; }
+  .ce-check-row:hover { border-color: #64748b; background: #162032; }
+  .ce-check-row.active { border-color: #10b981; background: rgba(16, 185, 129, 0.05); }
+  .ce-check-row input { width: 20px; height: 20px; accent-color: #10b981; cursor: pointer; }
+  .ce-check-content { display: flex; flex-direction: column; }
+  .ce-check-title { color: white; font-weight: 600; font-size: 0.95rem; }
+  .ce-check-desc { color: #64748b; font-size: 0.8rem; margin-top: 2px; }
+  .ce-divider { border: 0; border-top: 1px solid #334155; margin: 20px 0; }
+  .ce-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 15px; }
+  .ce-tag { background: rgba(239, 68, 68, 0.15); color: #fca5a5; padding: 6px 12px; border-radius: 20px; font-size: 0.85rem; display: flex; align-items: center; gap: 8px; border: 1px solid rgba(239, 68, 68, 0.3); }
+  .ce-tag button { background: none; border: none; color: inherit; cursor: pointer; font-size: 1.1rem; line-height: 1; }
+  .ce-error-msg { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; padding: 10px 14px; border-radius: 10px; font-size: 0.85rem; margin-top: 15px; display: flex; align-items: center; gap: 8px; }
+  .ce-nav-buttons { display: flex; gap: 12px; justify-content: flex-end; position: sticky; bottom: 0; background: linear-gradient(to top, #0f172a 80%, transparent); padding: 20px 0 0; margin: 0 -16px; padding-left: 16px; padding-right: 16px; }
+  .ce-btn-cancel { background: transparent; border: 1px solid #475569; color: #94a3b8; padding: 0.7rem 1.5rem; border-radius: 12px; cursor: pointer; font-weight: 600; transition: all 0.2s; display: flex; align-items: center; gap: 8px; }
+  .ce-btn-cancel:hover { border-color: #e2e8f0; color: #e2e8f0; }
+  .ce-btn-save { background: linear-gradient(135deg, #10b981, #059669); border: none; color: white; padding: 0.7rem 2rem; border-radius: 12px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3); transition: all 0.2s; display: flex; align-items: center; gap: 8px; }
+  .ce-btn-save:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4); }
+  @media (max-width: 1024px) { .ce-dual-row { grid-template-columns: 1fr; } .ce-time-capacity-row { grid-template-columns: 1fr; } }
+  @media (max-width: 640px) { .ce-scroll-container { height: calc(100vh - 140px); } .ce-grid-layout { gap: 16px; padding: 0 12px 16px; } .ce-card { padding: 16px; border-radius: 16px; } .ce-holiday-buttons { grid-template-columns: 1fr; } .ce-date-row { flex-direction: column; gap: 10px; } .ce-nav-buttons { flex-direction: column; gap: 10px; } .ce-btn-cancel, .ce-btn-save { width: 100%; justify-content: center; } }
 </style>

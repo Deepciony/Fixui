@@ -19,9 +19,16 @@
 }
 
 /* --- Global Reset & Scrollbar Settings --- */
+/* เพิ่มตัวนี้เพื่อให้แน่ใจว่าทุก Element จะไม่โชว์ Scrollbar (Firefox/IE/Edge) */
+* {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
 :global(html) {
   height: 100%;
-  overflow-y: scroll !important; /* บังคับให้มีกลไกการเลื่อนหน้าเสมอ */
+  /* แก้ไขจุดนี้: เปลี่ยนจาก scroll เป็น auto เพื่อไม่ให้บังคับวาด Track */
+  overflow-y: auto !important; 
   scrollbar-width: none !important; /* ซ่อน Scrollbar (Firefox) */
   -ms-overflow-style: none !important; /* ซ่อน Scrollbar (IE/Edge) */
 }
@@ -43,6 +50,15 @@
 :global(::-webkit-scrollbar) { 
   display: none !important; 
   width: 0px !important;
+  height: 0px !important; /* เพิ่ม height 0 เพื่อความชัวร์ */
+  background: transparent !important;
+}
+
+:global(::-webkit-scrollbar-track) {
+  background: transparent !important;
+}
+
+:global(::-webkit-scrollbar-thumb) {
   background: transparent !important;
 }
 
