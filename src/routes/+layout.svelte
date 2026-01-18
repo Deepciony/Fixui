@@ -1,15 +1,15 @@
 <script lang="ts">
-    import {beforeNavigate, goto} from "$app/navigation";
-    import {page} from "$app/stores";
-    import {browser} from "$app/environment";
+    import { beforeNavigate, goto } from "$app/navigation";
+    import { page } from "$app/stores";
+    import { browser } from "$app/environment";
     import "./organizer/app.css";
 
-    let {children} = $props();
+    let { children } = $props();
 
     const ROLE_HOME: Record<string, string> = {
         student: "/student/event-list",
         officer: "/officer/event-list",
-        organizer: "/organizer/create-event",
+        organizer: "/organizer/events", // ✅ ใช้หน้า Events เป็นหลัก
     };
 
     const GUEST_PATHS = [
@@ -21,7 +21,6 @@
         "/auth/reset-password",
     ];
 
-    // Path ที่ยอมให้เข้าได้เสมอ แม้จะไม่มี Ticket หรือล็อกอินอยู่
     const ALLOWED_DEEP_LINKS = [
         "/auth/reset-password",
         "/auth/verify-email",
@@ -29,18 +28,39 @@
     ];
 
     let isAuthorized = $state(false);
-    let isInitialized = $state(false); // ← เพิ่ม
+    let isChecking = $state(true); // ใช้ตัวแปรนี้คุม Loading Screen แทน
 
-    function getUserInfo() {
-        if (!browser) return {token: null, role: null};
+    // ✅ ฟังก์ชันตรวจสอบ Token แบบละเอียด (เช็ค Expiry ด้วย)
+    function validateToken() {
+        if (!browser) return { token: null, role: null, isValid: false };
+        
         const token = localStorage.getItem("access_token");
-        let role = null;
+        if (!token) return { token: null, role: null, isValid: false };
+
         try {
-            const info = localStorage.getItem("user_info");
-            if (info) role = JSON.parse(info).role?.toLowerCase();
-        } catch {
+            // เช็คโครงสร้าง JWT เบื้องต้น
+            const parts = token.split('.');
+            if (parts.length !== 3) throw new Error("Invalid Token");
+
+            // เช็ควันหมดอายุ
+            const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+            const now = Math.floor(Date.now() / 1000);
+            
+            if (payload.exp && payload.exp < now) {
+                // ถ้าหมดอายุ ให้ลบออกเลย จะได้ไม่เด้งไปเด้งมา
+                localStorage.clear();
+                sessionStorage.clear();
+                return { token: null, role: null, isValid: false };
+            }
+
+            const infoStr = localStorage.getItem("user_info");
+            const role = infoStr ? JSON.parse(infoStr).role?.toLowerCase() : null;
+            
+            return { token, role, isValid: true };
+        } catch (e) {
+            localStorage.clear();
+            return { token: null, role: null, isValid: false };
         }
-        return {token, role};
     }
 
     $effect(() => {
@@ -48,118 +68,89 @@
 
         const handleStorageChange = (event: StorageEvent) => {
             if (event.key === "access_token" && event.newValue === null) {
-                console.log("🔄 Logout detected.");
                 window.location.href = "/auth/login";
             }
         };
-
         window.addEventListener("storage", handleStorageChange);
         return () => window.removeEventListener("storage", handleStorageChange);
     });
 
-    beforeNavigate(({to}) => {
+    beforeNavigate(({ to }) => {
         if (!to) return;
         sessionStorage.setItem("authorized_ticket", to.url.pathname);
     });
 
-    // ⚠️ แก้ตรงนี้: เพิ่ม delay เล็กน้อยก่อน check
+    // ✅ Logic หลัก (ทำงานทันที ไม่มี setTimeout)
     $effect(() => {
         if (!browser) return;
 
-        // รอให้ localStorage ถูกเซ็ตก่อน
-        if (!isInitialized) {
-            setTimeout(() => {
-                isInitialized = true;
-            }, 150); // เพิ่มจาก 100 เป็น 150ms
-            return;
-        }
-
         const currentPath = $page.url.pathname;
-        const {token, role} = getUserInfo();
+        const { token, role, isValid } = validateToken(); // ตรวจสอบ Token ทันที
 
-        // 🔥 เช็คว่าเป็น Deep Link ที่อนุญาตหรือไม่ (ใช้ได้ทั้ง Guest และ Logged In)
         const isAllowedDeepLink = ALLOWED_DEEP_LINKS.some(p => currentPath.startsWith(p));
+        const isAuthPath = currentPath.startsWith("/auth") && !isAllowedDeepLink;
+        const isGuestPath = GUEST_PATHS.some(p => currentPath.startsWith(p));
 
         // ---------------------------------------------------------
-        // 1. กรณีไม่มี Token (Guest)
+        // 1. กรณีไม่มี Token หรือ Token หมดอายุ (Guest)
         // ---------------------------------------------------------
-        if (!token) {
-            const isGuestPath = GUEST_PATHS.some((p) => currentPath.startsWith(p));
-
+        if (!isValid) {
+            // ถ้าไม่ใช่หน้า Guest ให้ดีดไป Login
             if (!isGuestPath) {
-                goto("/auth/login", {replaceState: true});
+                goto("/auth/login", { replaceState: true });
                 return;
             }
-
-            const ticket = sessionStorage.getItem("authorized_ticket");
-
-            // ถ้าไม่มี Ticket หรือเป็น Deep Link ให้สร้าง Ticket ใหม่เลย
-            if (!ticket || isAllowedDeepLink) {
-                sessionStorage.setItem("authorized_ticket", currentPath);
-            } else if (ticket !== currentPath) {
-                console.log(`⛔ STOP! Guest typed URL manually.`);
-                goto(ticket, {replaceState: true});
-                isAuthorized = false;
-                return;
-            }
-
+            
+            // ถ้าอยู่หน้า Login อยู่แล้ว อนุญาตให้แสดงผล
             isAuthorized = true;
+            isChecking = false;
             return;
         }
 
         // ---------------------------------------------------------
         // 2. กรณีมี Token (Logged In)
         // ---------------------------------------------------------
+        
+        // ถ้าพยายามเข้าหน้า Login/Register ทั้งที่มี Token ให้ดีดไปหน้า Home ของ Role นั้น
+        if (currentPath === "/" || isAuthPath) {
+            const home = role && ROLE_HOME[role] ? ROLE_HOME[role] : "/student/event-list";
+            goto(home, { replaceState: true });
+            return; // ⛔️ สำคัญ: return เลย ไม่ต้องเซ็ต isAuthorized (หน้า Login จะไม่โผล่)
+        }
+
         const home = role && ROLE_HOME[role] ? ROLE_HOME[role] : "/auth/login";
-
-        if (home === "/auth/login") {
-            localStorage.clear();
-            sessionStorage.clear();
-            goto("/auth/login", {replaceState: true});
-            return;
-        }
-
-        // ถ้าเข้าหน้า /auth ปกติ (เช่น login/register) ให้ดีดไป Home
-        // ยกเว้นว่าเป็น Allowed Deep Link (เช่น reset-password) ให้เข้าได้
-        if (currentPath === "/" || (currentPath.startsWith("/auth") && !isAllowedDeepLink)) {
-            sessionStorage.setItem("authorized_ticket", home);
-            goto(home, {replaceState: true});
-            return;
-        }
-
+        const isRolePath = role && currentPath.startsWith(`/${role}`);
         const ticket = sessionStorage.getItem("authorized_ticket");
 
         if (!ticket) {
-            // ไม่มี Ticket (เช่น เปิดแท็บใหม่ หรือกด Link จาก Email)
-            // ถ้าไม่ใช่หน้า Home และ ไม่ใช่ Deep Link -> บังคับไป Home
-            if (currentPath !== home && !isAllowedDeepLink) {
-                console.log("⛔ No Ticket. Force Home.");
+            // Refresh หน้าจอ: ถ้า URL ถูกต้องตาม Role ให้สร้าง Ticket ใหม่เลย (ไม่งั้นจะเด้งกลับ Home)
+            if (isAllowedDeepLink || isRolePath) {
+                 sessionStorage.setItem("authorized_ticket", currentPath);
+            } else if (currentPath !== home) {
                 sessionStorage.setItem("authorized_ticket", home);
-                goto(home, {replaceState: true});
+                goto(home, { replaceState: true });
                 return;
             }
-            // ถ้าเป็น Deep Link ให้สร้าง Ticket ที่หน้านั้นเลย
-            sessionStorage.setItem("authorized_ticket", currentPath);
-        } else {
-            // มี Ticket แต่ URL ไม่ตรง
-            if (currentPath !== ticket) {
-                // 🔥 ถ้าเป็น Deep Link ให้ยอมรับ URL ใหม่ แล้วอัปเดต Ticket
-                if (isAllowedDeepLink) {
-                    sessionStorage.setItem("authorized_ticket", currentPath);
-                } else {
-                    console.log(`⛔ URL TAMPERED! Go back to ${ticket}`);
-                    goto(ticket, {replaceState: true});
-                    isAuthorized = false;
-                    return;
-                }
+        } else if (currentPath !== ticket) {
+            // URL เปลี่ยนเอง: ยอมรับถ้าเป็นหน้าของ Role ตัวเอง
+            if (isAllowedDeepLink || isRolePath) {
+                sessionStorage.setItem("authorized_ticket", currentPath);
+            } else {
+                goto(ticket, { replaceState: true });
+                isAuthorized = false;
+                return;
             }
         }
 
         isAuthorized = true;
+        isChecking = false;
     });
 </script>
 
-{#if isAuthorized || !isInitialized}
+{#if isChecking}
+    <div style="width: 100vw; height: 100vh; background-color: #111827; display: flex; align-items: center; justify-content: center;">
+        </div>
+{:else if isAuthorized}
     {@render children()}
 {:else}
     <div style="width: 100vw; height: 100vh; background-color: #111827;"></div>

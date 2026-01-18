@@ -73,5 +73,305 @@
     "date": "2026-12-31",
     "name": "New Year's Eve",
     "name_th": "วันสิ้นปี"
+  },
+  {
+    "date": "2027-01-01",
+    "name": "New Year's Day",
+    "name_th": "วันขึ้นปีใหม่"
+  },
+  {
+    "date": "2027-04-06",
+    "name": "Chakri Memorial Day",
+    "name_th": "วันจักรี"
+  },
+  {
+    "date": "2027-04-13",
+    "name": "Songkran Festival",
+    "name_th": "วันสงกรานต์"
+  },
+  {
+    "date": "2027-04-14",
+    "name": "Songkran Festival",
+    "name_th": "วันสงกรานต์"
+  },
+  {
+    "date": "2027-04-15",
+    "name": "Songkran Festival",
+    "name_th": "วันสงกรานต์"
+  },
+  {
+    "date": "2027-05-01",
+    "name": "National Labour Day",
+    "name_th": "วันแรงงานแห่งชาติ"
+  },
+  {
+    "date": "2027-05-04",
+    "name": "Coronation Day",
+    "name_th": "วันฉัตรมงคล"
+  },
+  {
+    "date": "2027-06-03",
+    "name": "Queen Suthida's Birthday",
+    "name_th": "วันเฉลิมพระชนมพรรษาสมเด็จพระนางเจ้าสุทิดา"
+  },
+  {
+    "date": "2027-07-28",
+    "name": "King Vajiralongkorn's Birthday",
+    "name_th": "วันเฉลิมพระชนมพรรษาพระบาทสมเด็จพระเจ้าอยู่หัว"
+  },
+  {
+    "date": "2027-08-12",
+    "name": "Queen Sirikit's Birthday / Mother's Day",
+    "name_th": "วันเฉลิมพระชนมพรรษาสมเด็จพระนางเจ้าสิริกิติ์ พระบรมราชินีนาถ / วันแม่แห่งชาติ"
+  },
+  {
+    "date": "2027-10-13",
+    "name": "King Bhumibol Memorial Day",
+    "name_th": "วันคล้ายวันสวรรคตพระบาทสมเด็จพระปรมินทรมหาภูมิพลอดุลยเดช บรมนาถบพิตร"
+  },
+  {
+    "date": "2027-10-23",
+    "name": "Chulalongkorn Day",
+    "name_th": "วันปิยมหาราช"
+  },
+  {
+    "date": "2027-12-05",
+    "name": "King Bhumibol's Birthday / Father's Day",
+    "name_th": "วันคล้ายวันพระบรมราชสมภพพระบาทสมเด็จพระปรมินทรมหาภูมิพลอดุลยเดช บรมนาถบพิตร / วันพ่อแห่งชาติ"
+  },
+  {
+    "date": "2027-12-10",
+    "name": "Constitution Day",
+    "name_th": "วันรัฐธรรมนูญ"
+  },
+  {
+    "date": "2027-12-31",
+    "name": "New Year's Eve",
+    "name_th": "วันสิ้นปี"
+  },
+  {
+    "date": "2028-01-01",
+    "name": "New Year's Day",
+    "name_th": "วันขึ้นปีใหม่"
+  },
+  {
+    "date": "2028-04-06",
+    "name": "Chakri Memorial Day",
+    "name_th": "วันจักรี"
+  },
+  {
+    "date": "2028-04-13",
+    "name": "Songkran Festival",
+    "name_th": "วันสงกรานต์"
+  },
+  {
+    "date": "2028-04-14",
+    "name": "Songkran Festival",
+    "name_th": "วันสงกรานต์"
+  },
+  {
+    "date": "2028-04-15",
+    "name": "Songkran Festival",
+    "name_th": "วันสงกรานต์"
+  },
+  {
+    "date": "2028-05-01",
+    "name": "National Labour Day",
+    "name_th": "วันแรงงานแห่งชาติ"
+  },
+  {
+    "date": "2028-05-04",
+    "name": "Coronation Day",
+    "name_th": "วันฉัตรมงคล"
+  },
+  {
+    "date": "2028-06-03",
+    "name": "Queen Suthida's Birthday",
+    "name_th": "วันเฉลิมพระชนมพรรษาสมเด็จพระนางเจ้าสุทิดา"
+  },
+  {
+    "date": "2028-07-28",
+    "name": "King Vajiralongkorn's Birthday",
+    "name_th": "วันเฉลิมพระชนมพรรษาพระบาทสมเด็จพระเจ้าอยู่หัว"
+  },
+  {
+    "date": "2028-08-12",
+    "name": "Queen Sirikit's Birthday / Mother's Day",
+    "name_th": "วันเฉลิมพระชนมพรรษาสมเด็จพระนางเจ้าสิริกิติ์ พระบรมราชินีนาถ / วันแม่แห่งชาติ"
+  },
+  {
+    "date": "2028-10-13",
+    "name": "King Bhumibol Memorial Day",
+    "name_th": "วันคล้ายวันสวรรคตพระบาทสมเด็จพระปรมินทรมหาภูมิพลอดุลยเดช บรมนาถบพิตร"
+  },
+  {
+    "date": "2028-10-23",
+    "name": "Chulalongkorn Day",
+    "name_th": "วันปิยมหาราช"
+  },
+  {
+    "date": "2028-12-05",
+    "name": "King Bhumibol's Birthday / Father's Day",
+    "name_th": "วันคล้ายวันพระบรมราชสมภพพระบาทสมเด็จพระปรมินทรมหาภูมิพลอดุลยเดช บรมนาถบพิตร / วันพ่อแห่งชาติ"
+  },
+  {
+    "date": "2028-12-10",
+    "name": "Constitution Day",
+    "name_th": "วันรัฐธรรมนูญ"
+  },
+  {
+    "date": "2028-12-31",
+    "name": "New Year's Eve",
+    "name_th": "วันสิ้นปี"
+  },
+  {
+    "date": "2029-01-01",
+    "name": "New Year's Day",
+    "name_th": "วันขึ้นปีใหม่"
+  },
+  {
+    "date": "2029-04-06",
+    "name": "Chakri Memorial Day",
+    "name_th": "วันจักรี"
+  },
+  {
+    "date": "2029-04-13",
+    "name": "Songkran Festival",
+    "name_th": "วันสงกรานต์"
+  },
+  {
+    "date": "2029-04-14",
+    "name": "Songkran Festival",
+    "name_th": "วันสงกรานต์"
+  },
+  {
+    "date": "2029-04-15",
+    "name": "Songkran Festival",
+    "name_th": "วันสงกรานต์"
+  },
+  {
+    "date": "2029-05-01",
+    "name": "National Labour Day",
+    "name_th": "วันแรงงานแห่งชาติ"
+  },
+  {
+    "date": "2029-05-04",
+    "name": "Coronation Day",
+    "name_th": "วันฉัตรมงคล"
+  },
+  {
+    "date": "2029-06-03",
+    "name": "Queen Suthida's Birthday",
+    "name_th": "วันเฉลิมพระชนมพรรษาสมเด็จพระนางเจ้าสุทิดา"
+  },
+  {
+    "date": "2029-07-28",
+    "name": "King Vajiralongkorn's Birthday",
+    "name_th": "วันเฉลิมพระชนมพรรษาพระบาทสมเด็จพระเจ้าอยู่หัว"
+  },
+  {
+    "date": "2029-08-12",
+    "name": "Queen Sirikit's Birthday / Mother's Day",
+    "name_th": "วันเฉลิมพระชนมพรรษาสมเด็จพระนางเจ้าสิริกิติ์ พระบรมราชินีนาถ / วันแม่แห่งชาติ"
+  },
+  {
+    "date": "2029-10-13",
+    "name": "King Bhumibol Memorial Day",
+    "name_th": "วันคล้ายวันสวรรคตพระบาทสมเด็จพระปรมินทรมหาภูมิพลอดุลยเดช บรมนาถบพิตร"
+  },
+  {
+    "date": "2029-10-23",
+    "name": "Chulalongkorn Day",
+    "name_th": "วันปิยมหาราช"
+  },
+  {
+    "date": "2029-12-05",
+    "name": "King Bhumibol's Birthday / Father's Day",
+    "name_th": "วันคล้ายวันพระบรมราชสมภพพระบาทสมเด็จพระปรมินทรมหาภูมิพลอดุลยเดช บรมนาถบพิตร / วันพ่อแห่งชาติ"
+  },
+  {
+    "date": "2029-12-10",
+    "name": "Constitution Day",
+    "name_th": "วันรัฐธรรมนูญ"
+  },
+  {
+    "date": "2029-12-31",
+    "name": "New Year's Eve",
+    "name_th": "วันสิ้นปี"
+  },
+  {
+    "date": "2030-01-01",
+    "name": "New Year's Day",
+    "name_th": "วันขึ้นปีใหม่"
+  },
+  {
+    "date": "2030-04-06",
+    "name": "Chakri Memorial Day",
+    "name_th": "วันจักรี"
+  },
+  {
+    "date": "2030-04-13",
+    "name": "Songkran Festival",
+    "name_th": "วันสงกรานต์"
+  },
+  {
+    "date": "2030-04-14",
+    "name": "Songkran Festival",
+    "name_th": "วันสงกรานต์"
+  },
+  {
+    "date": "2030-04-15",
+    "name": "Songkran Festival",
+    "name_th": "วันสงกรานต์"
+  },
+  {
+    "date": "2030-05-01",
+    "name": "National Labour Day",
+    "name_th": "วันแรงงานแห่งชาติ"
+  },
+  {
+    "date": "2030-05-04",
+    "name": "Coronation Day",
+    "name_th": "วันฉัตรมงคล"
+  },
+  {
+    "date": "2030-06-03",
+    "name": "Queen Suthida's Birthday",
+    "name_th": "วันเฉลิมพระชนมพรรษาสมเด็จพระนางเจ้าสุทิดา"
+  },
+  {
+    "date": "2030-07-28",
+    "name": "King Vajiralongkorn's Birthday",
+    "name_th": "วันเฉลิมพระชนมพรรษาพระบาทสมเด็จพระเจ้าอยู่หัว"
+  },
+  {
+    "date": "2030-08-12",
+    "name": "Queen Sirikit's Birthday / Mother's Day",
+    "name_th": "วันเฉลิมพระชนมพรรษาสมเด็จพระนางเจ้าสิริกิติ์ พระบรมราชินีนาถ / วันแม่แห่งชาติ"
+  },
+  {
+    "date": "2030-10-13",
+    "name": "King Bhumibol Memorial Day",
+    "name_th": "วันคล้ายวันสวรรคตพระบาทสมเด็จพระปรมินทรมหาภูมิพลอดุลยเดช บรมนาถบพิตร"
+  },
+  {
+    "date": "2030-10-23",
+    "name": "Chulalongkorn Day",
+    "name_th": "วันปิยมหาราช"
+  },
+  {
+    "date": "2030-12-05",
+    "name": "King Bhumibol's Birthday / Father's Day",
+    "name_th": "วันคล้ายวันพระบรมราชสมภพพระบาทสมเด็จพระปรมินทรมหาภูมิพลอดุลยเดช บรมนาถบพิตร / วันพ่อแห่งชาติ"
+  },
+  {
+    "date": "2030-12-10",
+    "name": "Constitution Day",
+    "name_th": "วันรัฐธรรมนูญ"
+  },
+  {
+    "date": "2030-12-31",
+    "name": "New Year's Eve",
+    "name_th": "วันสิ้นปี"
   }
 ]
