@@ -1,5 +1,3 @@
-<!-- ...existing code... -->
-<!-- ...existing code... -->
 <script lang="ts">
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
@@ -111,7 +109,7 @@
   $: currentView = menuItems.find(item => currentPath.startsWith(item.path))?.id || 'list';
   
   let isMobileMenuOpen = false;
-  let timeLeft = 3600; 
+  let timeLeft = 0; 
   let timerInterval: any;
   
   function formatTime(seconds: number): string {
@@ -142,10 +140,32 @@
     const token = localStorage.getItem('access_token');
     if (!token) {
       goto('/auth/login');
+      return;
     }
     
+    // ✅ ฟังก์ชันคำนวณเวลาที่ปรับปรุงแล้ว
+    const updateTimeLeft = () => {
+      const expiryStr = localStorage.getItem('token_expiry');
+      if (expiryStr) {
+        let expiry = parseInt(expiryStr, 10);
+        
+        // 🛠️ FIX: เช็คว่าถ้าค่า expiry เยอะผิดปกติ (มากกว่า 12 หลัก) แสดงว่าเป็น Milliseconds
+        // ให้หาร 1000 เพื่อแปลงเป็น Seconds ก่อน
+        if (expiry.toString().length > 11) {
+             expiry = Math.floor(expiry / 1000);
+        }
+
+        const now = Math.floor(Date.now() / 1000);
+        timeLeft = Math.max(0, expiry - now);
+      } else {
+        timeLeft = 0;
+      }
+    };
+
+    updateTimeLeft();
+
     timerInterval = setInterval(() => {
-      timeLeft = Math.max(0, timeLeft - 1);
+      updateTimeLeft();
       if (timeLeft <= 0) {
         handleLogout();
       }

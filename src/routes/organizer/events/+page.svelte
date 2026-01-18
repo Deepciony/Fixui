@@ -6,22 +6,19 @@
   
   // ✅ 1. ตั้งค่า Base URL ให้ถูกต้อง
   const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://158.108.102.14:8001").replace(/\/$/, "");
-  
   const api = axios.create({
     baseURL: API_BASE_URL,
     timeout: 30000,
     headers: { 'Content-Type': 'application/json' },
   });
-  
   api.interceptors.request.use((config) => {
     const token = localStorage.getItem('access_token');
     if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
   });
-  
+
   type Language = "th" | "en";
   let currentLang: Language = "th";
-  
   if (typeof localStorage !== "undefined") {
     const savedLang = localStorage.getItem("app_language");
     if (savedLang === "th" || savedLang === "en") currentLang = savedLang;
@@ -45,6 +42,9 @@
       rewards: "รางวัล", noRewards: "ไม่มีรางวัล", calculateRanks: "คำนวณอันดับ",
       finalizeRewards: "ยืนยันรางวัล", leaderboard: "กระดานคะแนน", rank: "อันดับ", tier: "ระดับ", close: "ปิด",
       hasRewards: "มีของรางวัลแจก",
+      holidayInfo: "วันหยุด", 
+      rewardInfo: "รางวัล",
+      stoppedSatSun: "หยุดเสาร์-อาทิตย์",
     },
     en: {
       participants: "Participants", viewDetails: "View Details", edit: "Edit", delete: "Delete",
@@ -63,21 +63,35 @@
       rewards: "Rewards", noRewards: "No Rewards", calculateRanks: "Calculate Ranks",
       finalizeRewards: "Finalize Rewards", leaderboard: "Leaderboard", rank: "Rank", tier: "Tier", close: "Close",
       hasRewards: "Has Rewards",
+      holidayInfo: "Holiday",
+      rewardInfo: "Reward",
+      stoppedSatSun: "Stopped Sat-Sun",
     },
   };
   
   $: lang = translations[currentLang];
-  
+
   interface RewardUser {
     id: string; name: string; rank?: number; tier?: string; distance?: number; time?: string;
+  }
+
+  interface Holiday {
+    id: number;
+    holiday_date: string;
+    holiday_name: string;
+    description?: string | null;
+    is_past?: boolean;
   }
 
   interface Event {
     id: string; title: string; description: string; location: string; image: string | null;
     status: 'Active' | 'Closed' | 'Draft';
     startDate: string; endDate: string; startTime: string; endTime: string;
-    totalSlots: number; usedSlots: number; pendingCount?: number; distanceKm?: number;
+    totalSlots: number; usedSlots: number; pendingCount?: number;
+    distanceKm?: number;
     rewards?: RewardUser[];
+    holidays?: Holiday[];
+    hasRewardProgram?: boolean;
   }
   
   let events: Event[] = [];
@@ -94,33 +108,25 @@
   
   onMount(async () => { await fetchEvents(); });
 
-  // ✅ 2. Helper: แก้ไข URL รูปภาพให้ถูกต้อง (เหมือนหน้า create-event)
   function resolveImageUrl(img: string | null) {
     if (!img) return null;
     if (img.startsWith('http') || img.startsWith('data:')) return img;
-    
-    // ตัด / หน้าสุดออก แล้วต่อด้วย Base URL + /api/
     const cleanPath = img.startsWith('/') ? img.slice(1) : img;
-    // ตรวจสอบว่า API_BASE_URL มี / ปิดท้ายหรือไม่
     const cleanBase = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`;
-    
-    // 🔥 แก้ URL ให้เป็น .../api/uploads/...
-    // (เพราะ Backend รับที่ path /api/uploads)
-    // แต่ถ้า path เดิมมี api อยู่แล้วก็ไม่ต้องเติม
     if (cleanPath.startsWith('api/')) {
         return `${cleanBase}${cleanPath}`;
     }
     return `${cleanBase}api/${cleanPath}`;
   }
 
-  // ✅ Helper: แปลงเวลา UTC -> Local
   function extractTime(iso: string) {
     if (!iso) return "";
     try {
       const date = new Date(iso);
       if (isNaN(date.getTime())) return "";
       return date.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false });
-    } catch { return ""; }
+    } catch { return "";
+    }
   }
 
   function mapToEvent(e: any): Event {
@@ -129,23 +135,122 @@
       title: e.title,
       description: e.description,
       location: e.location,
-      
-      // ✅ ใช้ resolveImageUrl
       image: resolveImageUrl(e.banner_image_url || e.image || e.banner || e.image_url || null),
-      
       status: (e.is_published && e.is_active) ? 'Active' : (!e.is_published && !e.is_active) ? 'Draft' : 'Closed',
       startDate: e.event_date || e.start_date || e.startDate || new Date().toISOString(),
       endDate: e.event_end_date || e.end_date || e.endDate || new Date().toISOString(),
-      
       startTime: e.start_time ? e.start_time.slice(0, 5) : extractTime(e.event_date || e.start_date),
       endTime: e.end_time ? e.end_time.slice(0, 5) : extractTime(e.event_end_date || e.end_date),
-      
       totalSlots: e.max_participants || e.totalSlots || 0,
       usedSlots: e.participant_count || e.participants || 0,
       pendingCount: 0,
       distanceKm: e.distance_km || e.distanceKm,
-      rewards: e.rewards || []
+      rewards: e.rewards || [],
+      holidays: e.holidays || [],
+      hasRewardProgram: false
     };
+  }
+
+  function getEventHolidayDisplay(event: Event): string {
+    if (!event.holidays || event.holidays.length === 0) return "";
+
+    const hasSatSun = event.holidays.some(h => {
+        const name = (h.holiday_name || "").toLowerCase();
+        return name.includes('เสาร์') || name.includes('อาทิตย์') || name.includes('sat') || name.includes('sun');
+    });
+
+    if (hasSatSun) return lang.stoppedSatSun; 
+
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    
+    const upcoming = event.holidays
+        .filter(h => new Date(h.holiday_date) >= today)
+        .sort((a, b) => new Date(a.holiday_date).getTime() - new Date(b.holiday_date).getTime());
+
+    if (upcoming.length > 0) {
+        return upcoming[0].holiday_name;
+    } else if (event.holidays.length > 0) {
+        return event.holidays[event.holidays.length - 1].holiday_name;
+    }
+
+    return "";
+  }
+
+  // ✅ ฟังก์ชันดึง Config รางวัล (ปรับปรุง Reactivity)
+  async function fetchRewardConfigsForEvents() {
+    const token = localStorage.getItem("access_token");
+    const headers = token ? { "Authorization": `Bearer ${token}` } : {};
+    const BATCH_SIZE = 5;
+    const eventsCopy = [...events];
+
+    for (let i = 0; i < eventsCopy.length; i += BATCH_SIZE) {
+      const batch = eventsCopy.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(async (event) => {
+          try {
+            const res = await api.get(`/api/reward-leaderboards/configs/event/${event.id}`, { headers });
+            // ✅ เช็ค is_active ว่าเป็น true หรือไม่
+            if (res.status === 200 && res.data && res.data.is_active === true) {
+                console.log(`✅ Event ${event.id}: Found Reward Config`);
+                return { eventId: event.id, hasReward: true };
+            }
+            return { eventId: event.id, hasReward: false };
+          } catch (err) { 
+            return { eventId: event.id, hasReward: false }; 
+          }
+        })
+      );
+
+      results.forEach((result) => {
+        if (result.status === "fulfilled") {
+          const { eventId, hasReward } = result.value;
+          const index = events.findIndex(e => e.id === eventId);
+          if (index !== -1) {
+             // ✅ สำคัญ: สร้าง Object ใหม่ เพื่อให้ Svelte รู้ว่ามีการเปลี่ยนแปลง
+             events[index] = { ...events[index], hasRewardProgram: hasReward };
+          }
+        }
+      });
+      // ✅ Trigger Svelte update
+      events = [...events];
+    }
+  }
+
+  async function fetchHolidaysForEvents() {
+    const token = localStorage.getItem("access_token");
+    const headers = token ? { "Authorization": `Bearer ${token}` } : {};
+    const BATCH_SIZE = 5; 
+    const eventsCopy = [...events];
+
+    for (let i = 0; i < eventsCopy.length; i += BATCH_SIZE) {
+      const batch = eventsCopy.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(async (event) => {
+          try {
+            const res = await api.get(`/api/events/${event.id}/holidays`, { headers });
+            if (res.status === 200 && res.data.holidays) {
+              return { eventId: event.id, holidays: res.data.holidays };
+            }
+            return { eventId: event.id, holidays: [] };
+          } catch (err) { 
+            return { eventId: event.id, holidays: [] }; 
+          }
+        })
+      );
+
+      results.forEach((result) => {
+        if (result.status === "fulfilled") {
+          const { eventId, holidays } = result.value;
+          const index = events.findIndex(e => e.id === eventId);
+          if (index !== -1) {
+             // ✅ สร้าง Object ใหม่เช่นกัน
+             events[index] = { ...events[index], holidays: holidays };
+          }
+        }
+      });
+      events = [...events];
+    }
   }
 
   async function fetchPendingCountsForEvents() {
@@ -172,7 +277,9 @@
         if (result.status === "fulfilled") {
           const { eventId, pendingCount } = result.value;
           const index = events.findIndex(e => e.id === eventId);
-          if (index !== -1) events[index].pendingCount = pendingCount;
+          if (index !== -1) {
+             events[index] = { ...events[index], pendingCount: pendingCount };
+          }
         }
       });
       events = [...events];
@@ -185,12 +292,19 @@
       const response = await api.get('/api/events');
       const rawEvents = response.data.events || response.data || [];
       events = rawEvents.map((e: any) => mapToEvent(e));
+      
+      // ✅ เรียกดึงข้อมูลเพิ่มเติม
       fetchPendingCountsForEvents(); 
-    } catch (error) { console.error('Error fetching events:', error); } 
-    finally { eventsLoading = false; }
+      fetchHolidaysForEvents();
+      fetchRewardConfigsForEvents(); 
+    } catch (error) { console.error('Error fetching events:', error);
+    } 
+    finally { eventsLoading = false;
+    }
   }
   
-  function translateStatus(status: string): string { const map: any = { Active: lang.active, Closed: lang.closed, Draft: lang.draft }; return map[status] || status; }
+  function translateStatus(status: string): string { const map: any = { Active: lang.active, Closed: lang.closed, Draft: lang.draft };
+    return map[status] || status; }
   function formatDateRange(event: Event): string {
     if (!event.startDate) return "-";
     try {
@@ -202,7 +316,8 @@
         const startStr = start.toLocaleDateString(locale, options);
         const endStr = end.toLocaleDateString(locale, options);
         return startStr === endStr ? startStr : `${startStr} - ${endStr}`;
-    } catch { return "-"; }
+    } catch { return "-";
+    }
   }
   function formatDate(dateStr: string): string {
     if (!dateStr) return "-";
@@ -213,38 +328,64 @@
         return date.toLocaleDateString(locale, { day: '2-digit', month: 'long', year: 'numeric' });
     } catch { return "-"; }
   }
-  function getEventType(event: Event): 'single' | 'multi' { if (!event.startDate) return 'single'; const start = new Date(event.startDate).toDateString(); const end = new Date(event.endDate).toDateString(); return start === end ? 'single' : 'multi'; }
-  function getEventTypeLabel(event: Event): string { return getEventType(event) === 'single' ? lang.singleDay : lang.multiDay; }
-  function getParticipantPercentage(event: Event): number { if (!event.totalSlots) return 0; return Math.min((event.usedSlots / event.totalSlots) * 100, 100); }
-  function getPendingPercentage(event: Event): number { if (!event.pendingCount || !event.totalSlots) return 0; return Math.min((event.pendingCount / event.totalSlots) * 100, 100); }
+  function getEventType(event: Event): 'single' | 'multi' { if (!event.startDate) return 'single';
+    const start = new Date(event.startDate).toDateString(); const end = new Date(event.endDate).toDateString(); return start === end ? 'single' : 'multi';
+  }
+  function getEventTypeLabel(event: Event): string { return getEventType(event) === 'single' ? lang.singleDay : lang.multiDay;
+  }
+  function getParticipantPercentage(event: Event): number { if (!event.totalSlots) return 0; return Math.min((event.usedSlots / event.totalSlots) * 100, 100);
+  }
+  function getPendingPercentage(event: Event): number { if (!event.pendingCount || !event.totalSlots) return 0; return Math.min((event.pendingCount / event.totalSlots) * 100, 100);
+  }
   
   async function handleViewDetails(event: Event) {
     selectedEvent = event; 
-    showDetailModal = true; 
+    showDetailModal = true;
     detailLoading = true;
     
     try {
       const response = await api.get(`/api/events/${event.id}`);
       let details = mapToEvent(response.data);
-      
-      // ✅ ใช้ rewards ที่ติดมากับ response หลักเลย ไม่ต้อง fetch แยก
       const rewards = response.data.rewards || [];
+      const holidays = response.data.holidays || [];
+      
+      // ✅ Inherit hasRewardProgram from the list view first
+      const hasRewardProgram = event.hasRewardProgram || false;
+
       selectedEvent = { 
         ...details, 
-        rewards: rewards 
+        rewards: rewards,
+        holidays: holidays,
+        hasRewardProgram: hasRewardProgram
       };
+      
+      if (!selectedEvent.holidays || selectedEvent.holidays.length === 0) {
+         const holRes = await api.get(`/api/events/${event.id}/holidays`);
+         if (holRes.data && holRes.data.holidays) {
+            selectedEvent.holidays = holRes.data.holidays;
+         }
+      }
+
+      // ✅ Double check rewards config for detail view
+      const rewardConfigRes = await api.get(`/api/reward-leaderboards/configs/event/${event.id}`).catch(() => null);
+      if (rewardConfigRes && rewardConfigRes.status === 200 && rewardConfigRes.data && rewardConfigRes.data.is_active) {
+          selectedEvent.hasRewardProgram = true;
+          // ✅ บังคับ Refresh Modal ด้วยการ Re-assign
+          selectedEvent = { ...selectedEvent };
+      }
 
     } catch (error) { 
-      console.error('Error loading details:', error); 
+      console.error('Error loading details:', error);
     } finally { 
-      detailLoading = false; 
+      detailLoading = false;
     }
   }
   
-  function closeDetailModal() { showDetailModal = false; selectedEvent = null; }
+  function closeDetailModal() { showDetailModal = false; selectedEvent = null;
+  }
   
   function handleEdit(eventId: string) { 
-    goto(`/organizer/create-event?id=${eventId}`); 
+    goto(`/organizer/create-event?id=${eventId}`);
   }
   
   async function handleDelete(eventId: string) {
@@ -255,15 +396,19 @@
     });
     if (result.isConfirmed) {
       try {
-        await api.delete(`/api/events/${eventId}`); await fetchEvents();
+        await api.delete(`/api/events/${eventId}`);
+        await fetchEvents();
         if (selectedEvent?.id === eventId) closeDetailModal();
         Swal.fire({ title: lang.deleted, text: lang.eventDeletedSuccess, icon: 'success', background: '#1e293b', color: '#fff', confirmButtonColor: '#10b981', timer: 1500, showConfirmButton: false });
-      } catch (error) { Swal.fire({ title: lang.error, text: lang.cannotDeleteEvent, icon: 'error', background: '#1e293b', color: '#fff', confirmButtonColor: '#10b981' }); }
+      } catch (error) { Swal.fire({ title: lang.error, text: lang.cannotDeleteEvent, icon: 'error', background: '#1e293b', color: '#fff', confirmButtonColor: '#10b981' });
+      }
     }
   }
-  function prevPage() { if (currentPage > 1) currentPage--; }
+  function prevPage() { if (currentPage > 1) currentPage--;
+  }
   function nextPage() { if (currentPage < totalPages) currentPage++; }
-  function jumpToPage(page: number) { currentPage = page; showPageDropdown = false; }
+  function jumpToPage(page: number) { currentPage = page;
+    showPageDropdown = false; }
 </script>
 
 <svelte:window on:click={() => (showPageDropdown = false)} />
@@ -294,7 +439,8 @@
                 alt={event.title} 
                 class="card-img" 
                 loading="lazy" 
-                on:error={(e) => { e.currentTarget.src = 'https://placehold.co/400x200/1e293b/64748b?text=Image+Error'; }} 
+                on:error={(e) => { e.currentTarget.src = 'https://placehold.co/400x200/1e293b/64748b?text=Image+Error';
+                }} 
               />
               <div class="status-badge-overlay">
                 <span class="status-badge" class:status-active={event.status === 'Active'} class:status-closed={event.status === 'Closed'} class:status-draft={event.status === 'Draft'}>{translateStatus(event.status)}</span>
@@ -303,24 +449,38 @@
             <div class="card-body">
               <div class="card-header"><h3>{event.title}</h3></div>
               <div class="card-content-area">
-                {#if event.description}<p class="event-description-short">{event.description.substring(0, 80)}{event.description.length > 80 ? '...' : ''}</p>{/if}
+                {#if event.description}<p class="event-description-short">{event.description.substring(0, 80)}{event.description.length > 80 ?
+                 '...' : ''}</p>{/if}
                 <div class="event-simple-meta">
                   <div class="meta-row event-type"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg><span class="type-badge" class:single-day={getEventType(event) === 'single'} class:multi-day={getEventType(event) === 'multi'}>{getEventTypeLabel(event)}</span></div>
-                  <div class="meta-row"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg><span>{event.location}</span></div>
+                  <div class="meta-row"><svg width="14" height="14" fill="none" stroke="currentColor" 
+                  viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg><span>{event.location}</span></div>
                   <div class="meta-row"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg><span>{formatDateRange(event)}</span></div>
                   {#if event.startTime && event.endTime}<div class="meta-row"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span>{event.startTime} - {event.endTime}</span></div>{/if}
-                  {#if event.rewards && event.rewards.length > 0}
-                    <div class="meta-row reward-row">
-                      <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                      <span>{lang.hasRewards}</span>
+                  
+                  {#if getEventHolidayDisplay(event)}
+                    <div class="meta-row holiday-row">
+                      <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      <span>{lang.holidayInfo}: <strong class="highlight-text">{getEventHolidayDisplay(event)}</strong></span>
                     </div>
                   {/if}
-                </div>
+
+                  {#if event.hasRewardProgram}
+                    <div class="meta-row reward-row">
+                      <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span>{lang.rewardInfo}: {lang.hasRewards}</span>
+                    </div>
+                  {/if}
+              </div>
               </div>
               {#if event.totalSlots && event.totalSlots > 0}
                 <div class="card-bottom-section">
                   <div class="participant-info">
-                    <div class="participant-row"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg><span class="participant-label">{lang.participants}:</span><span class="participant-value">{event.usedSlots || 0} / {event.totalSlots}</span></div>
+                  <div class="participant-row"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg><span class="participant-label">{lang.participants}:</span><span class="participant-value">{event.usedSlots || 0} / {event.totalSlots}</span></div>
                     <div class="progress-bar"><div class="progress-fill" style="width: {getParticipantPercentage(event)}%;"></div></div>
                   </div>
                   {#if event.pendingCount && event.pendingCount > 0}
@@ -342,6 +502,7 @@
           </div>
         {/each}
       </div>
+ 
       {#if totalPages > 1}
         <div class="pagination-wrapper">
           <div class="pagination-controls">
@@ -370,6 +531,7 @@
           {#if selectedEvent.image}
             <div class="detail-image"><img src={selectedEvent.image} alt={selectedEvent.title} /><div class="image-overlay"><span class="status-badge" class:status-active={selectedEvent.status === 'Active'} class:status-closed={selectedEvent.status === 'Closed'} class:status-draft={selectedEvent.status === 'Draft'}>{translateStatus(selectedEvent.status)}</span></div></div>
           {/if}
+        
           <div class="info-section">
             <div class="section-header"><svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><h3>{lang.basicInfo}</h3></div>
             <div class="info-grid"><div class="info-item"><label>{lang.title}</label><p>{selectedEvent.title}</p></div><div class="info-item full-width"><label>{lang.description}</label><p>{selectedEvent.description || '-'}</p></div><div class="info-item"><label>{lang.location}</label><p>{selectedEvent.location}</p></div><div class="info-item"><label>{lang.eventType}</label><p>{getEventTypeLabel(selectedEvent)}</p></div>{#if selectedEvent.distanceKm}<div class="info-item"><label>{lang.distance}</label><p>{selectedEvent.distanceKm} {lang.km}</p></div>{/if}</div>
@@ -378,6 +540,34 @@
             <div class="section-header"><svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg><h3>{lang.dateTime}</h3></div>
             <div class="info-grid"><div class="info-item"><label>{lang.startDate}</label><p>{formatDate(selectedEvent.startDate)}</p></div><div class="info-item"><label>{lang.endDate}</label><p>{formatDate(selectedEvent.endDate)}</p></div><div class="info-item"><label>{lang.startTime}</label><p>{selectedEvent.startTime}</p></div><div class="info-item"><label>{lang.endTime}</label><p>{selectedEvent.endTime}</p></div></div>
           </div>
+          
+          {#if getEventHolidayDisplay(selectedEvent)}
+            <div class="info-section">
+              <div class="section-header"><svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg><h3>{lang.holidayInfo}</h3></div>
+              <div class="info-grid">
+                <div class="info-item full-width"><p class="highlight-text large">{getEventHolidayDisplay(selectedEvent)}</p></div>
+              </div>
+            </div>
+          {/if}
+
+          {#if selectedEvent.hasRewardProgram}
+            <div class="info-section">
+              <div class="section-header"><svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><h3>{lang.rewards}</h3></div>
+              {#if selectedEvent.rewards && selectedEvent.rewards.length > 0}
+                <div class="rewards-grid">
+                  {#each selectedEvent.rewards.slice(0, 10) as user}
+                    <div class="reward-card">
+                      <div class="reward-rank">#{user.rank || '?'}</div>
+                      <div class="reward-info"><p class="reward-name">{user.name}</p>{#if user.tier}<span class="reward-tier tier-{user.tier.toLowerCase()}">{user.tier}</span>{/if}</div>
+                    </div>
+                  {/each}
+                </div>
+              {:else}
+                 <div class="info-grid"><div class="info-item full-width"><p>{lang.hasRewards}</p></div></div>
+              {/if}
+            </div>
+          {/if}
+
           <div class="info-section">
             <div class="section-header"><svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg><h3>{lang.participants}</h3></div>
             <div class="stats-cards">
@@ -387,19 +577,6 @@
             </div>
             <div class="progress-section"><div class="progress-info"><span>{lang.joined}: {selectedEvent.usedSlots || 0} / {selectedEvent.totalSlots}</span><span>{Math.round(getParticipantPercentage(selectedEvent))}%</span></div><div class="progress-bar large"><div class="progress-fill" style="width: {getParticipantPercentage(selectedEvent)}%;"></div></div></div>
           </div>
-          {#if selectedEvent.rewards && selectedEvent.rewards.length > 0}
-            <div class="info-section">
-              <div class="section-header"><svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><h3>{lang.rewards}</h3></div>
-              <div class="rewards-grid">
-                {#each selectedEvent.rewards.slice(0, 10) as user}
-                  <div class="reward-card">
-                    <div class="reward-rank">#{user.rank || '?'}</div>
-                    <div class="reward-info"><p class="reward-name">{user.name}</p>{#if user.tier}<span class="reward-tier tier-{user.tier.toLowerCase()}">{user.tier}</span>{/if}</div>
-                  </div>
-                {/each}
-              </div>
-            </div>
-          {/if}
         {/if}
       </div>
       <div class="modal-footer"><button class="modal-btn btn-secondary" on:click={closeDetailModal}>{lang.close}</button><button class="modal-btn btn-primary" on:click={() => { closeDetailModal(); handleEdit(selectedEvent.id); }}><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>{lang.edit}</button></div>
@@ -433,6 +610,12 @@
   .meta-row svg { color: #10b981; flex-shrink: 0; }
   .meta-row.reward-row { color: #fbbf24; font-weight: 600; }
   .meta-row.reward-row svg { color: #fbbf24; }
+  /* ✅ CSS สำหรับแถววันหยุด */
+  .meta-row.holiday-row { color: #10b981; }
+  .meta-row.holiday-row svg { color: #10b981; }
+  .highlight-text { color: #f8fafc; font-weight: 700; margin-left: 0.25rem; }
+  .highlight-text.large { font-size: 1.25rem; }
+
   .type-badge { padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
   .type-badge.single-day { background: rgba(59, 130, 246, 0.15); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.3); }
   .type-badge.multi-day { background: rgba(168, 85, 247, 0.15); color: #a855f7; border: 1px solid rgba(168, 85, 247, 0.3); }
