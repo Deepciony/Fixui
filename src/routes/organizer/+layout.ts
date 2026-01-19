@@ -1,29 +1,14 @@
+// src/routes/organizer/+layout.ts
 import { redirect } from '@sveltejs/kit';
 import type { LayoutLoad } from './$types';
 
-/**
- * Layout Load Function
- * 
- * This runs on every navigation to /organizer/*
- * Handles:
- * - Authentication check
- * - Token validation
- * - Redirect to login if not authenticated
- */
-export const load: LayoutLoad = async ({ url, fetch }) => {
-  // ==========================================
+export const load: LayoutLoad = async ({ url }) => {
   // 🔒 AUTHENTICATION CHECK
-  // ==========================================
-  
-  // Check if running in browser
   if (typeof window !== 'undefined') {
     const currentPath = window.location.pathname || url.pathname;
 
-    // If we're already on an auth page, don't try to redirect again
     if (currentPath.startsWith('/auth')) {
-      return {
-        timestamp: new Date().toISOString(),
-      };
+      return { timestamp: new Date().toISOString() };
     }
 
     const accessToken = localStorage.getItem('access_token');
@@ -35,41 +20,31 @@ export const load: LayoutLoad = async ({ url, fetch }) => {
       throw redirect(303, '/auth/login');
     }
     
-    // Validate token structure (basic check)
     try {
       const tokenParts = accessToken.split('.');
       if (tokenParts.length !== 3) {
-        console.error('❌ Invalid token format - redirecting to login');
+        console.error('❌ Invalid token format');
         localStorage.clear();
         sessionStorage.clear();
-        throw redirect(303, '/auth/login');  // ← แก้ตรงนี้
+        throw redirect(303, '/auth/login');
       }
       
-      // Decode JWT payload to check expiry
-      const payload = JSON.parse(atob(tokenParts[1].replace(/-/g, '+').replace(/_/g, '/')));
-      const now = Math.floor(Date.now() / 1000);
+      // ✅ เหลือไว้แค่นี้พอ (ลบส่วนเช็ค payload.exp < now ทิ้งไป)
+      // การทำแบบนี้จะยอมให้หน้าเว็บโหลดขึ้นมาได้แม้ Token หมดอายุ
+      // จากนั้น client.ts จะตรวจเจอ 401 และทำการ Refresh Token ให้อัตโนมัติเองครับ
       
-      // Token expired
-        if (payload.exp && payload.exp < now) {
-        console.warn('⏰ Token expired - redirecting to login');
-        localStorage.clear();
-        sessionStorage.clear();
-        if (!currentPath.startsWith('/auth')) throw redirect(303, '/auth/login');
+    } catch (error: any) {
+      // ✅ ตรวจสอบว่าเป็น Redirect Error หรือไม่
+      if (error?.status === 303 || error?.location) {
+        throw error;
       }
-      
-      console.log('✅ Auth check passed');
-      
-    } catch (error) {
+
       console.error('❌ Token validation error:', error);
       localStorage.clear();
       sessionStorage.clear();
       if (!currentPath.startsWith('/auth')) throw redirect(303, '/auth/login');
     }
   }
-  
-  // ==========================================
-  // 📊 LOAD INITIAL DATA (Optional)
-  // ==========================================
   
   return {
     timestamp: new Date().toISOString(),

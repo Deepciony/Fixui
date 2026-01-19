@@ -1,31 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import axios from 'axios';
+  import { api } from '../_lib/api/client';
+  import { endpoints } from '../_lib/api/endpoints';
   import Swal from 'sweetalert2';
-  
-  // --- API Configuration ---
-  const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
-  
-  const api = axios.create({
-    baseURL: API_BASE_URL,
-    timeout: 30000,
-  });
-  
-  api.interceptors.request.use((config) => {
-    if (typeof localStorage !== 'undefined') {
-      let token = localStorage.getItem('access_token');
-      if (token && typeof token === 'string') {
-        token = token.trim();
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
-          if (import.meta.env.DEV) {
-            console.log('[verify-proof] Attach token:', token);
-          }
-        }
-      }
-    }
-    return config;
-  });
   
   // --- Language ---
   type Language = "th" | "en";
@@ -37,6 +14,7 @@
   }
   
   const translations = {
+    // ... (คงเดิม ไม่ต้องแก้)
     th: {
       proofVerification: "ตรวจสอบหลักฐาน",
       selectEvent: "เลือกกิจกรรม",
@@ -132,7 +110,7 @@
     proofImage: string;
     status: "Pending" | "Approved" | "Rejected";
     submittedAt: string;
-    updatedAt: string; // ใช้สำหรับคำนวณยอดวันนี้
+    updatedAt: string;
     stravaLink?: string;
     actualDistance?: number;
   }
@@ -160,7 +138,7 @@
   let searchQuery = "";
   let batchFilter = "";
   let stdIdFilter = "";
-  let statusFilter = "Pending"; // Default to Pending for better UX
+  let statusFilter = "Pending";
   let fromDate = "";
   let toDate = "";
   
@@ -184,7 +162,7 @@
   let showImageModal = false;
   let modalImageUrl = "";
   
-  // Available dates for filtering
+  // Available dates
   let availableDates: { value: string; display: string }[] = [];
   
   // Statistics
@@ -200,7 +178,6 @@
   $: totalEventsPages = Math.ceil(events.length / eventsPerPage);
   
   $: filteredSubmissions = submissions.filter(sub => {
-    // Search filter
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const match = sub.runnerName.toLowerCase().includes(q) ||
@@ -208,28 +185,19 @@
                     sub.odySd.toLowerCase().includes(q);
       if (!match) return false;
     }
-    
-    // Batch filter
     if (batchFilter && batchFilter.length === 2) {
       if (!sub.odySd.startsWith(batchFilter)) return false;
     }
-    
-    // Std ID filter
     if (stdIdFilter && stdIdFilter.length > 0) {
       const stdPart = sub.odySd.substring(2, 8);
       if (!stdPart.includes(stdIdFilter)) return false;
     }
-    
-    // Status filter
     if (statusFilter !== "All" && sub.status !== statusFilter) return false;
-    
-    // Date filter
     if (fromDate || toDate) {
       const subDate = new Date(sub.submittedAt).toISOString().split('T')[0];
       if (fromDate && subDate < fromDate) return false;
       if (toDate && subDate > toDate) return false;
     }
-    
     return true;
   });
   
@@ -284,14 +252,11 @@
     statistics.total = submissions.length;
     statistics.pending = submissions.filter(s => s.status === "Pending").length;
     
-    // รีเซ็ตค่าทุกวันตามเวลาปัจจุบัน
     const today = new Date().toDateString();
-    
     statistics.approvedToday = submissions.filter(s => {
       const actionDate = s.updatedAt ? new Date(s.updatedAt).toDateString() : new Date(s.submittedAt).toDateString();
       return s.status === "Approved" && actionDate === today;
     }).length;
-    
     statistics.rejectedToday = submissions.filter(s => {
         const actionDate = s.updatedAt ? new Date(s.updatedAt).toDateString() : new Date(s.submittedAt).toDateString();
       return s.status === "Rejected" && actionDate === today;
@@ -303,8 +268,33 @@
   async function loadEvents() {
     loading = true;
     try {
-      // ✅ เรียก API จริง
-      const response = await api.get('/api/events');
+      // ✅ 1. ดึง User ID จาก localStorage
+      let userId = "";
+      if (typeof localStorage !== 'undefined') {
+        const userInfo = localStorage.getItem('user_info');
+        if (userInfo) {
+          try {
+            const user = JSON.parse(userInfo);
+            userId = user.id;
+          } catch (e) {
+            console.error("Error parsing user_info:", e);
+          }
+        }
+      }
+
+      // ถ้าไม่มี ID ให้หยุดและแจ้งเตือน (หรือ Redirect)
+      if (!userId) {
+        console.error("User ID not found in localStorage");
+        events = [];
+        loading = false;
+        return;
+      }
+
+      console.log(`🚀 Loading events for Organizer ID: ${userId}`);
+      
+      // ✅ ใช้ endpoint มาตรฐาน (ถ้าอยากใช้แบบ organizer เฉพาะ ให้เพิ่มใน endpoints)
+      const response = await api.get(endpoints.events.list);
+      
       if (response.data && Array.isArray(response.data)) {
         events = response.data.map((e: any) => ({
           id: e.id,
@@ -316,23 +306,22 @@
           startTime: e.start_time,
           endTime: e.end_time,
           status: e.status || "Active",
-          image: e.cover_image_url || e.image || "",
-          pendingCount: e.pending_proof_count || 0
+          image: e.cover_image_url || e.image || e.banner_image_url || e.picture_url || "",
+          pendingCount: e.pending_proof_count || e.pending_count || 0,
+          organizer: e.organizer || null,
+          details: e.details || null,
+          tags: e.tags || [],
+          participants: e.participants || [],
+          maxParticipants: e.max_participants || e.maxParticipants || null,
+          eventType: e.event_type || e.type || null,
+          // เพิ่ม field อื่นๆที่ backend ส่งมาได้เลย
         }));
+        console.log('✅ loadEvents success, count:', events.length);
       } else {
-        events = []; // Fallback
+        events = [];
       }
-    } catch (error) {
-      // Handle 401 Unauthorized
-      if (error?.response?.status === 401) {
-        if (typeof localStorage !== 'undefined') {
-          localStorage.removeItem('access_token');
-        }
-        // Redirect to login page (adjust path if needed)
-        window.location.href = '/auth/login';
-        return;
-      }
-      console.warn('API Load Error:', error);
+    } catch (error: any) {
+      console.warn('❌ loadEvents Error:', error);
       events = [];
     } finally {
       loading = false;
@@ -342,15 +331,16 @@
   async function selectEvent(event: Event) {
     selectedEvent = event;
     view = 'submissions';
-    statusFilter = "Pending"; // เมื่อเข้างาน ให้แสดง Pending ก่อน
+    statusFilter = "Pending";
     await loadSubmissions(event.id);
   }
   
   async function loadSubmissions(eventId: string) {
     loading = true;
     try {
-      // ✅ เรียก API จริง (ดึงทั้งหมดเพื่อมา Filter ฝั่ง Client)
+      // ✅ เปิดใช้งาน API loadSubmissions ปกติ (client.ts จะจัดการ token ให้)
       const response = await api.get(`/api/participations/event/${eventId}`);
+      
       if (response.data && Array.isArray(response.data)) {
           submissions = response.data.map((item: any) => ({
             id: item.id,
@@ -358,16 +348,16 @@
             odySd: item.user?.student_id || "-",
             email: item.user?.email || "-",
             proofImage: item.proof_url,
-            status: item.status, // "Pending", "Approved", "Rejected"
+            status: item.status,
             submittedAt: item.created_at,
-            updatedAt: item.updated_at || item.created_at, // ใช้สำหรับสถิติวันนี้
+            updatedAt: item.updated_at || item.created_at,
             stravaLink: item.strava_url,
             actualDistance: parseFloat(item.distance || "0"),
           }));
       } else {
           submissions = [];
       }
-      // Extract available dates
+      
       const dates = [...new Set(submissions.map(s => s.submittedAt.split('T')[0]))];
       availableDates = dates.sort().reverse().map(d => ({
         value: d,
@@ -379,14 +369,6 @@
       }));
       calculateStatistics();
     } catch (error) {
-      // Handle 401 Unauthorized (เหมือน loadEvents)
-      if (error?.response?.status === 401) {
-        if (typeof localStorage !== 'undefined') {
-          localStorage.removeItem('access_token');
-        }
-        window.location.href = '/auth/login';
-        return;
-      }
       console.warn('Failed to load submissions:', error);
       submissions = [];
       calculateStatistics();
@@ -404,8 +386,7 @@
     if (!approved) payload.rejection_reason = reason;
 
     try {
-      console.log("🚀 Sending Payload:", payload);
-      // ✅ เรียก API Verify จริง
+      // ✅ เปิดใช้งาน API verify
       const res = await api.post("/api/participations/verify", payload);
       return res.data;
     } catch (err: any) {
@@ -414,7 +395,6 @@
   }
   
   async function onApproveSubmission(sub: Submission) {
-    // ใช้ข้อมูลที่มีใน Submission หรือเว้นว่างไว้
     const stravaInfo = sub.stravaLink
       ? `<div class="info-row"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="flex-shrink: 0;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg><span>Strava: <a href="${sub.stravaLink}" target="_blank" style="color: #f97316;">${sub.stravaLink}</a></span></div>`
       : "";
@@ -422,7 +402,6 @@
       ? `<div class="info-row"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="flex-shrink: 0;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path></svg><span>Distance: <b style="color: #10b981;">${sub.actualDistance} km</b></span></div>`
       : "";
 
-    // HTML Structure ตามแม่แบบ
     const htmlContent = `<div class="reject-container"><p class="helper-text">Are you sure you want to verify this proof?</p><div class="approve-card"><div class="ac-avatar"><span class="ac-placeholder">${sub.runnerName.charAt(0).toUpperCase()}</span></div><div class="card-content"><span class="rj-title">${sub.runnerName}</span><span class="rj-desc">Submitted: ${new Date(sub.submittedAt).toLocaleString(currentLang === "th" ? "th-TH" : "en-GB", { timeZone: "Asia/Bangkok" })}</span></div></div><div class="approve-info"><div class="info-row"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="flex-shrink: 0;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span>Status changes to <b>COMPLETED</b></span></div>${stravaInfo}${distanceInfo}<div class="info-row"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="flex-shrink: 0;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span>System auto-assigns rewards</span></div></div></div>`;
 
     const styleContent = "<style>.reject-container { padding: 10px 0; text-align: left; }.helper-text { color: #94a3b8; font-size: 14px; margin-bottom: 20px; text-align: center; }.approve-card { display: flex; align-items: center; gap: 16px; background: rgba(16, 185, 129, 0.08); border: 2px solid rgba(16, 185, 129, 0.3); border-radius: 12px; padding: 16px; margin-bottom: 20px; }.ac-avatar { width: 56px; height: 56px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.3)); display: flex; align-items: center; justify-content: center; border: 2px solid rgba(16, 185, 129, 0.4); }.ac-placeholder { color: #10b981; font-size: 24px; font-weight: 700; text-transform: uppercase; }.card-content { flex: 1; display: flex; flex-direction: column; gap: 6px; }.rj-title { font-size: 16px; font-weight: 600; color: #f8fafc; }.rj-desc { font-size: 13px; color: #94a3b8; }.approve-info { background: rgba(30, 41, 59, 0.6); border: 2px solid rgba(71, 85, 105, 0.3); border-radius: 12px; padding: 16px; }.info-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; color: #cbd5e1; font-size: 14px; }.info-row svg { color: #10b981; }.info-row:not(:last-child) { border-bottom: 1px solid rgba(71, 85, 105, 0.2); }.info-row b { color: #10b981; font-weight: 600; }.swal-clean-popup-reject { background: #1e293b !important; border: 1px solid rgba(71, 85, 105, 0.3) !important; border-radius: 16px !important; padding: 24px !important; }.swal2-html-container { margin: 0 !important; }.swal2-validation-message { background: rgba(239, 68, 68, 0.1) !important; border: 2px solid rgba(239, 68, 68, 0.4) !important; border-radius: 12px !important; color: #fca5a5 !important; font-size: 14px !important; font-weight: 500 !important; padding: 12px 16px !important; margin: 16px 0 0 0 !important; display: none !important; align-items: center !important; gap: 8px !important; }@keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }@keyframes fadeOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-10px); } }.swal2-validation-message.show { display: flex !important; animation: slideDown 0.3s ease !important; }.swal2-validation-message.hide { animation: fadeOut 0.3s ease !important; }.swal2-validation-message::before { content: \"\"; display: inline-block; width: 20px; height: 20px; background: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23fca5a5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z'/%3E%3C/svg%3E\") no-repeat center; background-size: contain; flex-shrink: 0; }</style>";
