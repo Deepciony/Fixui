@@ -4,7 +4,7 @@
   import { appState } from '../../_lib/stores/appState';
   import { t } from '../../_lib/i18n';
   import { onMount } from 'svelte';
-  // ✅ 1. Import endpoints เพื่อใช้ URL ที่ถูกต้อง
+  // ✅ Import endpoints เพื่อใช้ URL ที่ถูกต้อง
   import { endpoints } from '../../_lib/api/endpoints';
 
   $: lang = $appState.currentLang;
@@ -70,19 +70,23 @@
     return modes[mode]?.[lang] || mode;
   }
 
-  // ✅ 2. แก้ไข Logic การ Submit ให้แยก Event และ Rewards
+  // ✅ แก้ไข handleSubmit ให้ทำงาน 3 Steps: Event -> Reward(s) -> Config
   async function handleSubmit() {
     isSubmitting = true;
     error = '';
-    console.log("🚀 Starting handleSubmit..."); // [Log จุดเริ่มต้น]
+    console.log("🚀 [START] handleSubmit initiated..."); 
 
     try {
-      // --- STEP 1: Submit Event Data ---
-      console.log("📦 Step 1: Preparing Event Data..."); // [Log ขั้นตอน]
+      // =========================================================
+      // STEP 1: Create/Update Event
+      // =========================================================
+      console.log("📦 [STEP 1] Preparing Event Data..."); 
       const formDataToSend = new FormData();
 
       Object.entries(formData).forEach(([key, value]) => {
+        // แยก rewards ไว้ทำทีหลัง ไม่ส่งไป endpoint events
         if (key === 'rewards' || key === 'totalRewards') return;
+        
         if (value !== null && value !== undefined) {
           if (Array.isArray(value)) {
             formDataToSend.append(key, JSON.stringify(value));
@@ -94,15 +98,13 @@
         }
       });
 
-      // เช็คว่า URL ถูกต้องไหม
       const eventUrl = editingEventId 
         ? endpoints.events.update(editingEventId)
         : endpoints.events.create;
       
-      console.log("🔗 Event API URL:", eventUrl); // [Log URL]
+      console.log(`🔗 Sending Event to: ${eventUrl}`);
 
-      // ยิง API
-      const response = await fetch(eventUrl, {
+      const eventResponse = await fetch(eventUrl, {
         method: editingEventId ? 'PUT' : 'POST',
         body: formDataToSend,
         headers: {
@@ -110,79 +112,125 @@
         }
       });
 
-      console.log("📡 Event API Status:", response.status); // [Log สถานะตอบกลับ]
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        console.error("❌ Event Creation Failed:", errData); // [Log Error]
+      if (!eventResponse.ok) {
+        const errData = await eventResponse.json().catch(() => ({}));
+        console.error("❌ Event Creation Failed:", errData);
         throw new Error(errData.detail || errData.message || 'Failed to submit event');
       }
 
-      const eventResult = await response.json();
+      const eventResult = await eventResponse.json();
+      // รับ ID ให้ชัวร์ รองรับทั้ง structure { id: 1 } และ { data: { id: 1 } }
       const eventId = eventResult.id || eventResult.data?.id || editingEventId;
       
-      console.log("✅ Event Created Successfully! ID:", eventId); // [Log สำคัญ: ได้ ID มาไหม]
+      console.log("✅ [STEP 1 SUCCESS] Event ID:", eventId);
 
-      // --- STEP 2: Create Reward Config ---
+      // =========================================================
+      // STEP 2: Create Rewards Individually (เพื่อเอา reward_id)
+      // =========================================================
       if (eventId && formData.rewards && formData.rewards.length > 0) {
-          console.log("🎁 Step 2: Creating Rewards for Event ID:", eventId); // [Log เริ่มสร้าง Reward]
+          console.log(`🏆 [STEP 2] Processing ${formData.rewards.length} rewards...`);
           
-          let endsAtStr = new Date().toISOString();
-          if (formData.eYear && formData.eMonth && formData.eDay && formData.endTime) {
-              const y = formData.eYear;
-              const m = formData.eMonth.toString().padStart(2, '0');
-              const d = formData.eDay.toString().padStart(2, '0');
-              const time = formData.endTime;
-              endsAtStr = `${y}-${m}-${d}T${time}:00`;
+          // เก็บ Tier ที่สร้างสำเร็จและมี ID แล้ว เตรียมส่งไป Config
+          const validTiers = [];
+
+          // วนลูปสร้าง Reward ทีละอัน
+          for (const [index, r] of formData.rewards.entries()) {
+              console.log(`   🔸 Creating Reward #${index + 1}: ${r.name}`);
+
+              const rewardPayload = {
+                  name: r.name,
+                  description: `Reward Tier ${index + 1} for Event ${eventId}`,
+                  required_completions: Number(r.requirement),
+                  time_period_days: 60, // หรือคำนวณจากระยะเวลากิจกรรม
+                  meta: { event_id: eventId }
+              };
+
+              // ยิง API สร้าง Reward (endpoints.rewards.createReward ต้องมีค่าเป็น '/api/rewards')
+              const rewardRes = await fetch(endpoints.rewards.createReward, {
+                  method: 'POST',
+                  headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${localStorage.getItem('access_token') || ''}`
+                  },
+                  body: JSON.stringify(rewardPayload)
+              });
+
+              if (!rewardRes.ok) {
+                  console.error(`      ❌ Failed to create reward #${index+1}`);
+                  continue; // ข้ามตัวที่พังไป แต่ทำตัวถัดไปต่อ
+              }
+
+              const rewardData = await rewardRes.json();
+              const newRewardId = rewardData.id || rewardData.data?.id;
+              
+              console.log(`      ✅ Created! Reward ID: ${newRewardId}`);
+
+              if (newRewardId) {
+                  validTiers.push({
+                      tier: index + 1,
+                      reward_id: newRewardId, // ✅ ต้องส่ง ID นี้ไปผูกกับ Config
+                      reward_name: r.name,
+                      required_completions: Number(r.requirement),
+                      quantity: 0, // unlimited
+                      min_rank: 0,
+                      max_rank: 0
+                  });
+              }
           }
 
-          const configPayload = {
-              event_id: eventId,
-              name: "Default Leaderboard",
-              description: "Generated from event creation",
-              max_reward_recipients: Number(formData.totalRewards) || 0,
-              required_completions: 1, 
-              starts_at: new Date().toISOString(),
-              ends_at: new Date(endsAtStr).toISOString(),
-              reward_tiers: formData.rewards.map((r, index) => ({
-                  tier: index + 1,
-                  reward_name: r.name,
-                  required_completions: Number(r.requirement),
-                  quantity: 0,
-                  min_rank: 0,
-                  max_rank: 0
-              }))
-          };
+          // =========================================================
+          // STEP 3: Create Leaderboard Config (ใช้ข้อมูลจาก Step 2)
+          // =========================================================
+          if (validTiers.length > 0) {
+              console.log("⚙️ [STEP 3] Creating Leaderboard Config...");
+              
+              let endsAtStr = new Date().toISOString();
+              if (formData.eYear && formData.eMonth && formData.eDay && formData.endTime) {
+                  const y = formData.eYear;
+                  const m = formData.eMonth.toString().padStart(2, '0');
+                  const d = formData.eDay.toString().padStart(2, '0');
+                  const time = formData.endTime;
+                  endsAtStr = `${y}-${m}-${d}T${time}:00`;
+              }
 
-          console.log("📤 Reward Config Payload:", configPayload); // [Log ดูข้อมูลที่จะส่งไป]
+              const configPayload = {
+                  event_id: eventId,
+                  name: "Main Leaderboard",
+                  description: "Auto-generated config",
+                  max_reward_recipients: Number(formData.totalRewards) || 100,
+                  required_completions: 1, 
+                  starts_at: new Date().toISOString(),
+                  ends_at: new Date(endsAtStr).toISOString(),
+                  reward_tiers: validTiers // ✅ ส่ง array ที่มี reward_id แล้ว
+              };
 
-          const rewardRes = await fetch(endpoints.rewards.createConfig, {
-              method: 'POST',
-              headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${localStorage.getItem('access_token') || ''}`
-              },
-              body: JSON.stringify(configPayload)
-          });
+              const configRes = await fetch(endpoints.rewards.createConfig, {
+                  method: 'POST',
+                  headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${localStorage.getItem('access_token') || ''}`
+                  },
+                  body: JSON.stringify(configPayload)
+              });
 
-          console.log("📡 Reward API Status:", rewardRes.status); // [Log ผลลัพธ์ Reward API]
-
-          if (!rewardRes.ok) {
-              const rewardErr = await rewardRes.json().catch(() => ({}));
-              console.warn('⚠️ Failed to create reward config:', rewardErr); // [Log เตือนถ้าสร้าง Reward ไม่ผ่าน]
+              if (configRes.ok) {
+                  console.log("✅ [STEP 3 SUCCESS] Config Created");
+              } else {
+                  console.warn("⚠️ [STEP 3 FAILED] Could not create config:", await configRes.text());
+              }
           } else {
-              console.log("✅ Reward Config Created Successfully");
+              console.warn("⚠️ No rewards were created successfully, skipping config creation.");
           }
       } else {
-          console.log("ℹ️ No rewards to create or missing Event ID");
+          console.log("ℹ️ No rewards selected, skipping Step 2 & 3.");
       }
       
-      console.log("🏁 Process Complete. Redirecting...");
+      console.log("🏁 [FINISH] Redirecting to event list...");
       eventForm.reset();
       goto('/organizer/events');
       
     } catch (err: any) {
-      console.error("💥 Critical Error in handleSubmit:", err); // [Log Error ใหญ่สุด]
+      console.error("💥 Critical Error in handleSubmit:", err);
       error = err.message || 'An error occurred';
       isSubmitting = false;
     }
@@ -205,8 +253,10 @@
       </svg>
     </div>
     <div>
-      <h3 class="ce-summary-title">{lang === 'th' ? 'ตรวจสอบข้อมูลก่อนเผยแพร่' : 'Review Before Publishing'}</h3>
-      <p class="ce-summary-desc">{lang === 'th' ? 'กรุณาตรวจสอบข้อมูลให้ถูกต้องก่อนเผยแพร่กิจกรรม' : 'Please verify all information before publishing your event'}</p>
+      <h3 class="ce-summary-title">{lang === 'th' ?
+        'ตรวจสอบข้อมูลก่อนเผยแพร่' : 'Review Before Publishing'}</h3>
+      <p class="ce-summary-desc">{lang === 'th' ?
+        'กรุณาตรวจสอบข้อมูลให้ถูกต้องก่อนเผยแพร่กิจกรรม' : 'Please verify all information before publishing your event'}</p>
     </div>
   </div>
 
@@ -377,14 +427,13 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
         </svg>
       {/if}
-      {editingEventId ? (lang === 'th' ? 'บันทึกการแก้ไข' : 'Save Changes') : (lang === 'th' ? 'เผยแพร่กิจกรรม' : 'Publish Event')}
+      {editingEventId ?
+        (lang === 'th' ? 'บันทึกการแก้ไข' : 'Save Changes') : (lang === 'th' ? 'เผยแพร่กิจกรรม' : 'Publish Event')}
     </button>
   </div>
 </div>
 
 <style>
- 
-  
   .ce-summary-header {
     display: flex;
     align-items: center;

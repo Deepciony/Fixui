@@ -708,11 +708,14 @@
               }
               
               try {
-                  const rewardRes = await api.post('/api/rewards/', { 
-                      name: t.reward_name, 
-                      description: `Reward: ${t.reward_name} (${t.required_completions} completions required)`,
-                      required_completions: Number(t.required_completions)
-                  });
+                const timePeriodDays = (t.time_period_days && Number(t.time_period_days)) || 30;
+                const rewardRes = await api.post('/api/rewards/', {
+                  name: t.reward_name,
+                  description: `Reward: ${t.reward_name} (${t.required_completions} completions required)`,
+                  required_completions: Number(t.required_completions),
+                  time_period_days: timePeriodDays,
+                  meta: {}
+                });
                   return { 
                     ...t, 
                     reward_id: rewardRes.data.id,
@@ -812,13 +815,20 @@
                           } catch (delErr) {
                               console.warn("Delete failed, will create new:", delErr);
                           }
-                          await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
+                          const recreated = await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
+                          editingRewardConfigId = recreated.data?.id || recreated.data?.config_id || editingRewardConfigId;
+                          console.log('✅ Recreated reward config after delete:', editingRewardConfigId, recreated.data);
+                          Swal.fire({ icon: 'success', title: 'สร้าง Leaderboard ใหม่สำเร็จ', html: `Config ID: <strong>${editingRewardConfigId}</strong>`, background: '#1e293b', color: '#fff', timer: 1800 });
                       }
                   } else {
                       // Try to create new config
-                      try {
-                          await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
-                      } catch (createErr: any) {
+                        try {
+                          const createRes = await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
+                          // Capture created config id
+                          editingRewardConfigId = createRes.data?.id || createRes.data?.config_id || editingRewardConfigId;
+                          console.log('✅ Created reward config:', editingRewardConfigId, createRes.data);
+                          Swal.fire({ icon: 'success', title: 'สร้าง Leaderboard สำเร็จ', html: `Config ID: <strong>${editingRewardConfigId}</strong>`, background: '#1e293b', color: '#fff', timer: 2000 });
+                        } catch (createErr: any) {
                           // If creation fails because config already exists, GET it and UPDATE
                           if (createErr.response?.status === 400 && 
                               createErr.response?.data?.detail?.includes('already has a leaderboard')) {
@@ -829,14 +839,16 @@
                                   const existingConfig = await api.get(`/api/reward-leaderboards/configs/event/${rewardConfigPayload.event_id}`);
                                   const configId = existingConfig.data?.id;
                                   
-                                  if (configId) {
+                                    if (configId) {
                                       console.log("Found existing config ID:", configId, "- updating it");
                                       // Update the existing config instead of creating new
-                                      await api.put(`/api/reward-leaderboards/configs/${configId}`, rewardConfigPayload);
-                                      console.log("✅ Updated existing reward config");
-                                  } else {
+                                      const updRes = await api.put(`/api/reward-leaderboards/configs/${configId}`, rewardConfigPayload);
+                                      editingRewardConfigId = configId;
+                                      console.log("✅ Updated existing reward config:", updRes.data);
+                                      Swal.fire({ icon: 'success', title: 'อัพเดท Leaderboard สำเร็จ', html: `Config ID: <strong>${editingRewardConfigId}</strong>`, background: '#1e293b', color: '#fff', timer: 1800 });
+                                    } else {
                                       throw new Error("Config exists but no ID found");
-                                  }
+                                    }
                               } catch (fetchErr: any) {
                                   // If GET also fails (500 - corrupt), offer to force delete
                                   if (fetchErr.response?.status === 500) {
@@ -875,8 +887,9 @@
                                               }
                                               
                                               // Now create fresh config
-                                              await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
-                                              console.log("✅ Created fresh reward config");
+                                              const freshRes = await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
+                                              editingRewardConfigId = freshRes.data?.id || freshRes.data?.config_id || editingRewardConfigId;
+                                              console.log("✅ Created fresh reward config:", editingRewardConfigId, freshRes.data);
                                               
                                               Swal.fire({
                                                   icon: 'success',
