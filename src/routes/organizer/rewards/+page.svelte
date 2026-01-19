@@ -497,23 +497,99 @@
   }
   
   // ===== Data Loading =====
-  function loadMockData() {
-    events = mockEvents;
+  async function loadEvents() {
+    loading = true;
+    try {
+      const res = await api.get('/api/events');
+      const data = res.data;
+      if (Array.isArray(data)) {
+        events = data.map((e: any) => ({
+          id: e.id,
+          title: e.title || e.name,
+          description: e.description,
+          location: e.location,
+          start_date: e.start_date || e.event_date,
+          end_date: e.end_date || e.event_end_date,
+          image: e.banner_image_url || e.cover_image_url || e.image || '',
+          status: e.is_active ? 'Active' : (e.status || 'Closed'),
+          max_participants: e.max_participants || e.maxParticipants,
+          distance_km: e.distance_km || e.distanceKm,
+          reward_config_id: e.reward_config_id || null
+        }));
+      } else {
+        events = [];
+      }
+    } catch (err) {
+      console.error('Failed to load events', err);
+      // Fallback to mock
+      events = mockEvents;
+    } finally {
+      loading = false;
+    }
   }
-  
+
   async function selectEventForRewards(event: Event) {
     selectedEvent = event;
     loading = true;
-    
-    // Simulate API call
-    setTimeout(() => {
+    rewards = [];
+    rewardConfig = null;
+    try {
+      // Try to load reward config for event
+      try {
+        const cfgRes = await api.get(`/api/reward-leaderboards/events/${event.id}/config`);
+        rewardConfig = cfgRes.data || null;
+      } catch (e) {
+        // if endpoint not available, ignore and continue
+        console.warn('No reward config endpoint or failed to load config', e);
+      }
+
+      // Load leaderboard entries for event
+      let entries: any[] = [];
+      try {
+        const entRes = await api.get(`/api/reward-leaderboards/events/${event.id}/users`);
+        const body = entRes.data;
+        if (Array.isArray(body)) entries = body;
+        else if (body && Array.isArray(body.users)) entries = body.users;
+      } catch (e) {
+        console.warn('Failed to fetch leaderboard entries, falling back to mock', e);
+        entries = mockRewards as any[];
+      }
+
+      // Map entries to RewardEntry shape
+      rewards = entries.map((r: any, idx: number) => ({
+        id: r.id || idx + 1,
+        config_id: (rewardConfig && rewardConfig.id) || r.config_id || null,
+        user_id: r.user_id || r.id || 0,
+        total_completions: r.total_completions || r.total_completions || 0,
+        completed_event_participations: r.completed_event_participations || r.event_participations || [],
+        rank: r.rank || r.position || idx + 1,
+        qualified_at: r.qualified_at || r.qualifiedAt || null,
+        reward_id: r.reward_id || r.rewardId || null,
+        reward_tier: r.reward_tier || r.tier || null,
+        rewarded_at: r.rewarded_at || r.rewardedAt || null,
+        created_at: r.created_at || r.createdAt || new Date().toISOString(),
+        updated_at: r.updated_at || r.updatedAt || new Date().toISOString(),
+        user_full_name: r.user_full_name || r.user_name || `${r.first_name || ''} ${r.last_name || ''}`.trim(),
+        user_email: r.user_email || r.email || '',
+        user_role: r.user_role || r.role || 'participant',
+        user_nisit_id: r.user_nisit_id || r.nisit_id || ''
+      }));
+
+      calculateStatistics();
+      applyFilters();
+      view = 'leaderboard';
+    } catch (err) {
+      console.error('selectEventForRewards failed', err);
+      Swal.fire({ icon: 'error', title: lang.error, text: 'Failed to load leaderboard data' });
+      // fallback
       rewards = mockRewards;
       rewardConfig = mockConfig;
       calculateStatistics();
       applyFilters();
       view = 'leaderboard';
+    } finally {
       loading = false;
-    }, 500);
+    }
   }
   
   // ===== Filter Functions =====
@@ -570,25 +646,69 @@
     
     if (result.isConfirmed) {
       isCalculating = true;
-      
-      // Simulate API call
-      setTimeout(() => {
-        Swal.fire({
-          icon: 'success',
-          title: lang.success,
-          text: lang.rankCalculated,
-          timer: 2000
-        });
-        isCalculating = false;
-        
-        // Update mock data to show qualified_at
-        rewards = rewards.map(r => ({
-          ...r,
-          qualified_at: r.rank <= 10 ? new Date().toISOString() : null
-        }));
+      try {
+        let res;
+        // Prefer config-based calculate endpoint
+        if (rewardConfig && rewardConfig.id) {
+          try {
+            res = await api.post(`/api/reward-leaderboards/configs/${rewardConfig.id}/calculate`);
+          } catch (e) {
+            // fallback to event-based calculate
+            res = await api.post(`/api/reward-leaderboards/events/${selectedEvent?.id}/calculate`);
+          }
+        } else {
+          res = await api.post(`/api/reward-leaderboards/events/${selectedEvent?.id}/calculate`);
+        }
+
+        // If API returns computed entries, use them
+        const body = res && res.data ? res.data : null;
+        let entries: any[] = [];
+        if (body) {
+          if (Array.isArray(body)) entries = body;
+          else if (Array.isArray(body.entries)) entries = body.entries;
+          else if (Array.isArray(body.users)) entries = body.users;
+        }
+
+        if (entries.length > 0) {
+          rewards = entries.map((r: any, idx: number) => ({
+            id: r.id || idx + 1,
+            config_id: (rewardConfig && rewardConfig.id) || r.config_id || null,
+            user_id: r.user_id || r.id || 0,
+            total_completions: r.total_completions || r.total_completions || 0,
+            completed_event_participations: r.completed_event_participations || r.event_participations || [],
+            rank: r.rank || r.position || idx + 1,
+            qualified_at: r.qualified_at || r.qualifiedAt || null,
+            reward_id: r.reward_id || r.rewardId || null,
+            reward_tier: r.reward_tier || r.tier || null,
+            rewarded_at: r.rewarded_at || r.rewardedAt || null,
+            created_at: r.created_at || r.createdAt || new Date().toISOString(),
+            updated_at: r.updated_at || r.updatedAt || new Date().toISOString(),
+            user_full_name: r.user_full_name || r.user_name || `${r.first_name || ''} ${r.last_name || ''}`.trim(),
+            user_email: r.user_email || r.email || '',
+            user_role: r.user_role || r.role || 'participant',
+            user_nisit_id: r.user_nisit_id || r.nisit_id || ''
+          }));
+        } else {
+          // if API didn't return entries, keep previous data but mark top ranks qualified
+          rewards = rewards.map(r => ({
+            ...r,
+            qualified_at: r.rank <= (rewardConfig?.max_reward_recipients || 10) ? new Date().toISOString() : r.qualified_at
+          }));
+        }
+
+        // Optionally update rewardConfig from response
+        if (body && body.config) rewardConfig = body.config;
+
         calculateStatistics();
         applyFilters();
-      }, 2000);
+
+        Swal.fire({ icon: 'success', title: lang.success, text: lang.rankCalculated, timer: 2000 });
+      } catch (err) {
+        console.error('calculateRanks failed', err);
+        Swal.fire({ icon: 'error', title: lang.error, text: 'Failed to calculate ranks' });
+      } finally {
+        isCalculating = false;
+      }
     }
   }
   
@@ -606,31 +726,42 @@
     
     if (result.isConfirmed) {
       isFinalizing = true;
-      
-      // Simulate API call
-      setTimeout(() => {
-        Swal.fire({
-          icon: 'success',
-          title: lang.success,
-          text: lang.leaderboardFinalized,
-          timer: 2000
-        });
-        isFinalizing = false;
-        
-        // Update config
-        if (rewardConfig) {
-          rewardConfig.is_finalized = true;
-          rewardConfig.finalized_at = new Date().toISOString();
+      try {
+        let res;
+        if (rewardConfig && rewardConfig.id) {
+          try {
+            res = await api.post(`/api/reward-leaderboards/configs/${rewardConfig.id}/finalize`);
+          } catch (e) {
+            res = await api.post(`/api/reward-leaderboards/events/${selectedEvent?.id}/finalize`);
+          }
+        } else {
+          res = await api.post(`/api/reward-leaderboards/events/${selectedEvent?.id}/finalize`);
         }
-        
-        // Update rewards
+
+        const body = res && res.data ? res.data : null;
+        if (body && body.config) rewardConfig = body.config;
+
+        // Mark rewarded_at for qualified entries
         rewards = rewards.map(r => ({
           ...r,
-          rewarded_at: r.qualified_at ? new Date().toISOString() : null
+          rewarded_at: r.qualified_at ? (r.rewarded_at || new Date().toISOString()) : r.rewarded_at
         }));
+
+        if (rewardConfig) {
+          rewardConfig.is_finalized = true;
+          rewardConfig.finalized_at = rewardConfig.finalized_at || new Date().toISOString();
+        }
+
         calculateStatistics();
         applyFilters();
-      }, 2000);
+
+        Swal.fire({ icon: 'success', title: lang.success, text: lang.leaderboardFinalized, timer: 2000 });
+      } catch (err) {
+        console.error('finalizeLeaderboard failed', err);
+        Swal.fire({ icon: 'error', title: lang.error, text: 'Failed to finalize leaderboard' });
+      } finally {
+        isFinalizing = false;
+      }
     }
   }
   
@@ -648,24 +779,26 @@
     
     if (result.isConfirmed) {
       isResetting = true;
-      
-      // Simulate API call
-      setTimeout(() => {
-        Swal.fire({
-          icon: 'success',
-          title: lang.success,
-          text: lang.leaderboardReset,
-          timer: 2000
-        });
-        isResetting = false;
-        
-        // Reset config
+      try {
+        let res;
+        if (rewardConfig && rewardConfig.id) {
+          try {
+            res = await api.post(`/api/reward-leaderboards/configs/${rewardConfig.id}/reset`);
+          } catch (e) {
+            res = await api.post(`/api/reward-leaderboards/events/${selectedEvent?.id}/reset`);
+          }
+        } else {
+          res = await api.post(`/api/reward-leaderboards/events/${selectedEvent?.id}/reset`);
+        }
+
+        const body = res && res.data ? res.data : null;
+        if (body && body.config) rewardConfig = body.config;
+
         if (rewardConfig) {
           rewardConfig.is_finalized = false;
           rewardConfig.finalized_at = null;
         }
-        
-        // Reset rewards
+
         rewards = rewards.map(r => ({
           ...r,
           qualified_at: null,
@@ -675,7 +808,14 @@
         }));
         calculateStatistics();
         applyFilters();
-      }, 1500);
+
+        Swal.fire({ icon: 'success', title: lang.success, text: lang.leaderboardReset, timer: 2000 });
+      } catch (err) {
+        console.error('resetLeaderboard failed', err);
+        Swal.fire({ icon: 'error', title: lang.error, text: 'Failed to reset leaderboard' });
+      } finally {
+        isResetting = false;
+      }
     }
   }
   
@@ -777,7 +917,7 @@
   
   // ===== Lifecycle =====
   onMount(() => {
-    loadMockData();
+    loadEvents();
   });
 </script>
 

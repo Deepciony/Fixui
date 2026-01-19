@@ -7,6 +7,11 @@
 
   const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://158.108.102.14:8001").replace(/\/$/, "");
 
+  function capitalizeFirstLetter(string: string) {
+    if (!string) return "Pending";
+    return string.charAt(0).toUpperCase() + string.slice(1).toLowerCase();
+  }
+
   function getApiImageUrl(path: string): string {
     if (!path) return "";
     if (path.startsWith("http")) return path; // ถ้ามี http อยู่แล้วใช้ได้เลย
@@ -210,7 +215,7 @@
       const stdPart = sub.odySd.substring(2, 8);
       if (!stdPart.includes(stdIdFilter)) return false;
     }
-    if (statusFilter !== "All" && sub.status !== statusFilter) return false;
+    if (statusFilter !== "All" && sub.status.toLowerCase() !== statusFilter.toLowerCase()) return false;
     if (fromDate || toDate) {
       const subDate = new Date(sub.submittedAt).toISOString().split('T')[0];
       if (fromDate && subDate < fromDate) return false;
@@ -362,35 +367,47 @@
  async function loadSubmissions(eventId: string) {
     loading = true;
     try {
-      // ❌ ของเดิม (สาเหตุที่ Error 404):
-      // const response = await api.get(`/api/participations/event/${eventId}`);
-
-      // ✅ แก้ไข: เรียกใช้จาก endpoints.ts (ซึ่งเราแก้ให้ยิงไปที่ .../proofs แล้ว)
+      // เรียก API
       const response = await api.get(endpoints.participations.listByEvent(eventId));
-      
-      console.log("Submissions Data:", response.data); 
+      console.log("Submissions Data:", response.data);
 
-      if (response.data && Array.isArray(response.data)) {
-          submissions = response.data.map((item: any) => {
-            const userObj = item.user || {}; 
+      // ✅ [แก้ไข 1] รองรับโครงสร้างข้อมูลแบบ { proofs: [...] }
+      const rawData = response.data;
+      const dataList = Array.isArray(rawData) ? rawData : (rawData.proofs || []);
+
+      if (Array.isArray(dataList)) {
+          submissions = dataList.map((item: any) => {
+            const userObj = item.user || {};
             
-            // ดึงวันที่จากหลาย field ที่เป็นไปได้
-            const rawDate = item.created_at || item.createdAt || item.timestamp || new Date().toISOString();
+            // ✅ [แก้ไข 2] ดึงวันที่จาก proof_submitted_at (ตาม JSON)
+            const rawDate = item.proof_submitted_at || item.created_at || item.createdAt || new Date().toISOString();
+
+            // ✅ [แก้ไข 3] แปลง Status "proof_submitted" -> "Pending" เพื่อให้ Filter ทำงานได้
+            let mappedStatus = item.status;
+            if (mappedStatus === 'proof_submitted') {
+                mappedStatus = 'Pending';
+            } else {
+                mappedStatus = capitalizeFirstLetter(mappedStatus);
+            }
 
             return {
-              id: item.id,
-              runnerName: userObj.display_name || item.runner_name || "Unknown",
-              odySd: userObj.student_id || item.student_id || "-",
+              // ✅ [แก้ไข 4] Map ชื่อตัวแปรให้ตรงกับ JSON
+              id: item.participation_id || item.id, 
+              runnerName: userObj.full_name || userObj.display_name || item.runner_name || "Unknown",
+              odySd: userObj.nisit_id || userObj.student_id || item.student_id || "-",
               email: userObj.email || item.email || "-",
               
-              // ใช้ getApiImageUrl ที่เราสร้างไว้
-              proofImage: getApiImageUrl(item.proof_url || item.image_url || ""),
+              // ✅ [แก้ไข 5] ใช้ proof_image_url
+              proofImage: getApiImageUrl(item.proof_image_url || item.proof_url || item.image_url || ""),
               
-              status: item.status,
+              status: mappedStatus,
+              
               submittedAt: rawDate,
-              updatedAt: item.updated_at || item.updatedAt || rawDate,
-              stravaLink: item.strava_url || null,
-              actualDistance: parseFloat(item.distance || "0"),
+              updatedAt: item.updated_at || rawDate,
+              
+              // ✅ [แก้ไข 6] ใช้ strava_link และ actual_distance_km
+              stravaLink: item.strava_link || item.strava_url || null,
+              actualDistance: parseFloat(item.actual_distance_km || item.distance || "0"),
             };
           });
       } else {

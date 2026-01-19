@@ -28,9 +28,9 @@ export const endpoints = {
     getCheckoutCode: (participationId: number | string) => `/api/participations/${participationId}/checkout-code`,
 
     // 5. [POST] Checkout (Organizer สแกนเพื่อจบงาน)
-    checkout: (participationId: number | string) => `/api/participations/${participationId}/checkout`,
+    checkout: (participationId: number | string) => `/api/participations/${participationId}/checkout-code`,
     // 6. [POST] Checkout by code/QR (Organizer scans code)
-    checkoutByCode: '/api/participations/checkout',
+    checkoutByCode: '/api/participations/check-out',
   },
   
   // Proof Submissions
