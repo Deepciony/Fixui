@@ -2,24 +2,51 @@
   import { onMount } from 'svelte';
   import axios from 'axios';
   import Swal from 'sweetalert2';
-  import html2canvas from 'html2canvas';
-  import jsPDF from 'jspdf';
-  
+  import { endpoints } from '../_lib/api/endpoints'; //
+
   // ===== API Configuration =====
-  const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+  // ใช้ client instance ที่อาจจะมีการ config interceptors ไว้แล้วในโปรเจคจริง หรือสร้างใหม่ที่นี่
+  const API_BASE_URL = (
+    (import.meta.env.VITE_API_BASE_URL && import.meta.env.VITE_API_BASE_URL.trim() !== "")
+      ? import.meta.env.VITE_API_BASE_URL
+      : 'http://158.108.102.14:8001'
+  ).replace(/\/$/, "");
+
+  if (!(import.meta.env.VITE_API_BASE_URL && import.meta.env.VITE_API_BASE_URL.trim() !== "")) {
+    console.warn('[rewards] VITE_API_BASE_URL not set — falling back to', API_BASE_URL);
+  }
   
+  function showApiError(err: any, defaultMsg = 'Server error') {
+    console.error(err);
+    let detail = defaultMsg;
+    try {
+      if (err && err.response && err.response.data) {
+        const d = err.response.data;
+        if (typeof d === 'string') detail = d;
+        else if (d.detail) detail = d.detail;
+        else if (d.message) detail = d.message;
+        else detail = JSON.stringify(d);
+      } else if (err && err.message) {
+        detail = err.message;
+      }
+    } catch (e) {
+      console.error('showApiError parse failed', e);
+    }
+    Swal.fire({ icon: 'error', title: lang.error, text: detail });
+  }
+
   const api = axios.create({
     baseURL: API_BASE_URL,
     timeout: 30000,
   });
-  
+
   api.interceptors.request.use((config) => {
     const token = localStorage.getItem('access_token');
     if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
   });
-  
-  // ===== Types =====
+
+  // ===== Types (ปรับให้ตรงกับ Backend Pydantic Schemas) =====
   interface Event {
     id: number;
     title: string;
@@ -31,28 +58,43 @@
     status: string;
     max_participants?: number;
     distance_km?: number;
-    reward_config_id?: number;
   }
   
+  // โครงสร้างข้อมูล Entry ที่ได้จาก API /api/reward-leaderboards/configs/{id}/entries
   interface RewardEntry {
-    id: number;
-    config_id: number;
+    id: number; // Entry ID
     user_id: number;
-    total_completions: number;
-    completed_event_participations: number[];
-    rank: number;
-    qualified_at: string | null;
-    reward_id: number | null;
-    reward_tier: number | null;
-    rewarded_at: string | null;
-    created_at: string;
-    updated_at: string;
     user_full_name: string;
     user_email: string;
-    user_role: string;
     user_nisit_id?: string;
+    user_role?: string;
+    
+    total_completions: number;
+    rank: number;
+    
+    // Reward Info
+    reward_id: number | null;
+    reward_name?: string | null;
+    reward_tier: number | null;
+    
+    // Timestamps
+    qualified_at: string | null;
+    rewarded_at: string | null;
+    
+    created_at?: string;
+    updated_at?: string;
   }
   
+  interface RewardTier {
+    tier: number;
+    reward_id: number;
+    reward_name: string;
+    quantity: number;
+    required_completions: number;
+    min_rank: number;
+    max_rank: number;
+  }
+
   interface RewardConfig {
     id: number;
     event_id: number;
@@ -65,16 +107,6 @@
     is_finalized: boolean;
     finalized_at: string | null;
     reward_tiers: RewardTier[];
-  }
-  
-  interface RewardTier {
-    tier: number;
-    reward_id: number;
-    reward_name: string;
-    quantity: number;
-    required_completions: number;
-    min_rank: number;
-    max_rank: number;
   }
   
   interface Statistics {
@@ -102,7 +134,7 @@
       backToEvents: "กลับไปเลือกกิจกรรม",
       loading: "กำลังโหลด...",
       noEvents: "ไม่มีกิจกรรม",
-      noData: "ไม่มีข้อมูล",
+      noData: "ไม่มีข้อมูล (กรุณากดคำนวณอันดับ)",
       viewRewards: "ดูรางวัล",
       calculateRanks: "คำนวณอันดับ",
       finalizeLeaderboard: "ยืนยันผลรางวัล",
@@ -143,9 +175,9 @@
       of: "จาก",
       results: "รายการ",
       confirmCalculate: "คุณต้องการคำนวณอันดับหรือไม่?",
-      confirmCalculateText: "ระบบจะคำนวณอันดับและสิทธิ์รับรางวัลตามข้อมูลปัจจุบัน",
+      confirmCalculateText: "ระบบจะดึงข้อมูลการเข้าร่วมและจัดอันดับใหม่ (Preview)",
       confirmFinalize: "ยืนยันการแจกรางวัล?",
-      confirmFinalizeText: "เมื่อยืนยันแล้วจะไม่สามารถแก้ไขได้ รางวัลจะถูกแจกให้ผู้ได้รับตามอันดับ",
+      confirmFinalizeText: "เมื่อยืนยันแล้วจะไม่สามารถแก้ไขได้ รางวัลจะถูกแจกให้ผู้ได้รับตามอันดับทันที",
       confirmReset: "รีเซ็ตผลรางวัล?",
       confirmResetText: "การกระทำนี้จะลบผลการคำนวณทั้งหมด คุณแน่ใจหรือไม่?",
       success: "สำเร็จ",
@@ -159,14 +191,15 @@
       step1: "ขั้นตอนที่ 1: คำนวณอันดับ",
       step2: "ขั้นตอนที่ 2: ตรวจสอบผล",
       step3: "ขั้นตอนที่ 3: ยืนยันผลรางวัล",
-      step1Desc: "คำนวณอันดับและสิทธิ์รับรางวัลตามจำนวนครั้งที่เข้าร่วม",
-      step2Desc: "ตรวจสอบความถูกต้องของผลการคำนวณ",
+      step1Desc: "คำนวณอันดับและสิทธิ์รับรางวัลตามจำนวนครั้งที่เข้าร่วม (Simulate)",
+      step2Desc: "ตรวจสอบความถูกต้องของผลการคำนวณในตารางด้านล่าง",
       step3Desc: "ยืนยันผลและแจกรางวัลให้ผู้ได้รับ (ไม่สามารถแก้ไขได้)",
       role: "บทบาท",
       participant: "ผู้เข้าร่วม",
       officer: "เจ้าหน้าที่",
       tier: "ระดับ",
-      viewParticipations: "ดูการเข้าร่วม",
+      noConfigTitle: "ไม่พบการตั้งค่ารางวัล",
+      noConfigDesc: "กิจกรรมนี้ยังไม่ได้ตั้งค่า Leaderboard กรุณาตั้งค่าในหน้าแก้ไขกิจกรรมก่อน",
     },
     en: {
       rewardManagement: "Reward Management",
@@ -174,7 +207,7 @@
       backToEvents: "Back to Events",
       loading: "Loading...",
       noEvents: "No events",
-      noData: "No data",
+      noData: "No data (Please calculate ranks)",
       viewRewards: "View Rewards",
       calculateRanks: "Calculate Ranks",
       finalizeLeaderboard: "Finalize Leaderboard",
@@ -215,7 +248,7 @@
       of: "of",
       results: "results",
       confirmCalculate: "Calculate ranks?",
-      confirmCalculateText: "System will calculate ranks and eligibility based on current data",
+      confirmCalculateText: "System will fetch participation data and simulate ranking",
       confirmFinalize: "Finalize leaderboard?",
       confirmFinalizeText: "Once finalized, changes cannot be made. Rewards will be distributed.",
       confirmReset: "Reset leaderboard?",
@@ -231,14 +264,15 @@
       step1: "Step 1: Calculate Ranks",
       step2: "Step 2: Review Results",
       step3: "Step 3: Finalize Rewards",
-      step1Desc: "Calculate ranks and eligibility based on participation count",
-      step2Desc: "Review calculation results for accuracy",
+      step1Desc: "Calculate ranks and eligibility based on participation count (Simulate)",
+      step2Desc: "Review calculation results for accuracy in the table below",
       step3Desc: "Confirm and distribute rewards (cannot be changed)",
       role: "Role",
       participant: "Participant",
       officer: "Officer",
       tier: "Tier",
-      viewParticipations: "View Participations",
+      noConfigTitle: "No Reward Configuration",
+      noConfigDesc: "This event has no leaderboard configuration. Please configure it in the event settings.",
     }
   };
   
@@ -260,7 +294,7 @@
     averageCompletions: 0,
     topCompletion: 0
   };
-  
+
   // ===== Filters =====
   let searchQuery = "";
   let selectedStatus = "";
@@ -279,158 +313,6 @@
   let isCalculating = false;
   let isFinalizing = false;
   let isResetting = false;
-  
-  // ===== Mock Data =====
-  const mockEvents: Event[] = [
-    {
-      id: 1,
-      title: "Bangkok Marathon 2026",
-      description: "วิ่งมาราธอนกรุงเทพฯ ครั้งที่ 10",
-      location: "สนามหลวง กรุงเทพฯ",
-      start_date: "2026-02-15T00:00:00Z",
-      end_date: "2026-02-15T23:59:59Z",
-      image: "https://placehold.co/400x200/10b981/ffffff?text=Bangkok+Marathon",
-      status: "Active",
-      max_participants: 1000,
-      distance_km: 42.195,
-      reward_config_id: 1
-    },
-    {
-      id: 2,
-      title: "Chiang Mai Trail Run",
-      description: "วิ่งเทรลบนดอยสุเทพ",
-      location: "ดอยสุเทพ เชียงใหม่",
-      start_date: "2026-03-01T00:00:00Z",
-      end_date: "2026-03-31T23:59:59Z",
-      image: "https://placehold.co/400x200/3b82f6/ffffff?text=Trail+Run",
-      status: "Active",
-      max_participants: 500,
-      distance_km: 21,
-      reward_config_id: 2
-    },
-    {
-      id: 3,
-      title: "Phuket Beach Run Series",
-      description: "วิ่งชายหาดภูเก็ต 4 สัปดาห์",
-      location: "หาดป่าตอง ภูเก็ต",
-      start_date: "2026-01-01T00:00:00Z",
-      end_date: "2026-01-31T23:59:59Z",
-      image: "https://placehold.co/400x200/f59e0b/ffffff?text=Beach+Run",
-      status: "Closed",
-      max_participants: 300,
-      distance_km: 10,
-      reward_config_id: 3
-    }
-  ];
-  
-  const mockRewards: RewardEntry[] = [
-    {
-      id: 1, config_id: 1, user_id: 101, total_completions: 12,
-      completed_event_participations: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-      rank: 1, qualified_at: "2026-01-15T10:00:00Z", reward_id: 1, reward_tier: 1,
-      rewarded_at: "2026-01-16T12:00:00Z", created_at: "2026-01-01T00:00:00Z",
-      updated_at: "2026-01-16T12:00:00Z", user_full_name: "สมชาย ใจดี",
-      user_email: "somchai@example.com", user_role: "participant", user_nisit_id: "66130500001"
-    },
-    {
-      id: 2, config_id: 1, user_id: 102, total_completions: 11,
-      completed_event_participations: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-      rank: 2, qualified_at: "2026-01-15T10:00:00Z", reward_id: 1, reward_tier: 1,
-      rewarded_at: "2026-01-16T12:00:00Z", created_at: "2026-01-02T00:00:00Z",
-      updated_at: "2026-01-16T12:00:00Z", user_full_name: "สุดา สวยงาม",
-      user_email: "suda@example.com", user_role: "participant", user_nisit_id: "66130500002"
-    },
-    {
-      id: 3, config_id: 1, user_id: 103, total_completions: 10,
-      completed_event_participations: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-      rank: 3, qualified_at: "2026-01-15T10:00:00Z", reward_id: 2, reward_tier: 2,
-      rewarded_at: "2026-01-16T12:00:00Z", created_at: "2026-01-03T00:00:00Z",
-      updated_at: "2026-01-16T12:00:00Z", user_full_name: "ประยุทธ์ วิ่งเร็ว",
-      user_email: "prayut@example.com", user_role: "participant", user_nisit_id: "66130500003"
-    },
-    {
-      id: 4, config_id: 1, user_id: 104, total_completions: 9,
-      completed_event_participations: [1, 2, 3, 4, 5, 6, 7, 8, 9],
-      rank: 4, qualified_at: "2026-01-15T10:00:00Z", reward_id: 2, reward_tier: 2,
-      rewarded_at: null, created_at: "2026-01-04T00:00:00Z",
-      updated_at: "2026-01-15T10:00:00Z", user_full_name: "อนงค์ แข็งแรง",
-      user_email: "anong@example.com", user_role: "officer", user_nisit_id: "65130500001"
-    },
-    {
-      id: 5, config_id: 1, user_id: 105, total_completions: 8,
-      completed_event_participations: [1, 2, 3, 4, 5, 6, 7, 8],
-      rank: 5, qualified_at: "2026-01-15T10:00:00Z", reward_id: 3, reward_tier: 3,
-      rewarded_at: null, created_at: "2026-01-05T00:00:00Z",
-      updated_at: "2026-01-15T10:00:00Z", user_full_name: "วิชัย กล้าหาญ",
-      user_email: "wichai@example.com", user_role: "participant", user_nisit_id: "66130500004"
-    },
-    {
-      id: 6, config_id: 1, user_id: 106, total_completions: 7,
-      completed_event_participations: [1, 2, 3, 4, 5, 6, 7],
-      rank: 6, qualified_at: null, reward_id: null, reward_tier: null,
-      rewarded_at: null, created_at: "2026-01-06T00:00:00Z",
-      updated_at: "2026-01-10T00:00:00Z", user_full_name: "มานี รักวิ่ง",
-      user_email: "manee@example.com", user_role: "participant", user_nisit_id: "66130500005"
-    },
-    {
-      id: 7, config_id: 1, user_id: 107, total_completions: 6,
-      completed_event_participations: [1, 2, 3, 4, 5, 6],
-      rank: 7, qualified_at: null, reward_id: null, reward_tier: null,
-      rewarded_at: null, created_at: "2026-01-07T00:00:00Z",
-      updated_at: "2026-01-10T00:00:00Z", user_full_name: "ชัยชนะ พยายาม",
-      user_email: "chaichana@example.com", user_role: "participant", user_nisit_id: "66130500006"
-    },
-    {
-      id: 8, config_id: 1, user_id: 108, total_completions: 5,
-      completed_event_participations: [1, 2, 3, 4, 5],
-      rank: 8, qualified_at: null, reward_id: null, reward_tier: null,
-      rewarded_at: null, created_at: "2026-01-08T00:00:00Z",
-      updated_at: "2026-01-10T00:00:00Z", user_full_name: "สมศรี เพียรพยายาม",
-      user_email: "somsri@example.com", user_role: "participant", user_nisit_id: "66130500007"
-    }
-  ];
-  
-  const mockConfig: RewardConfig = {
-    id: 1,
-    event_id: 1,
-    name: "Bangkok Marathon Rewards",
-    description: "Competition-based reward distribution",
-    max_reward_recipients: 100,
-    required_completions: 1,
-    starts_at: "2026-02-15T00:00:00Z",
-    ends_at: "2026-02-15T23:59:59Z",
-    is_finalized: false,
-    finalized_at: null,
-    reward_tiers: [
-      {
-        tier: 1,
-        reward_id: 1,
-        reward_name: "เหรียญทอง + เสื้อ Premium",
-        quantity: 3,
-        required_completions: 10,
-        min_rank: 1,
-        max_rank: 3
-      },
-      {
-        tier: 2,
-        reward_id: 2,
-        reward_name: "เหรียญเงิน + เสื้อ Standard",
-        quantity: 7,
-        required_completions: 8,
-        min_rank: 4,
-        max_rank: 10
-      },
-      {
-        tier: 3,
-        reward_id: 3,
-        reward_name: "เหรียญทองแดง",
-        quantity: 40,
-        required_completions: 5,
-        min_rank: 11,
-        max_rank: 50
-      }
-    ]
-  };
   
   // ===== Computed =====
   $: paginatedRewards = filteredRewards.slice(
@@ -463,20 +345,17 @@
     if (!timestamp) return "-";
     const date = new Date(timestamp);
     return date.toLocaleDateString(currentLang === "th" ? "th-TH" : "en-GB", {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit'
     });
   }
   
-  function formatDateRange(event: Event): string {
+  function formatDateRange(event: Event | null): string {
+    if (!event) return "-";
     const start = new Date(event.start_date);
     const end = new Date(event.end_date);
     const locale = currentLang === "th" ? "th-TH" : "en-GB";
     const options: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short', year: 'numeric' };
-    
     if (start.toDateString() === end.toDateString()) {
       return start.toLocaleDateString(locale, options);
     }
@@ -500,29 +379,27 @@
   async function loadEvents() {
     loading = true;
     try {
-      const res = await api.get('/api/events');
+      // ใช้ endpoints.events.list
+      const res = await api.get(endpoints.events.list);
       const data = res.data;
-      if (Array.isArray(data)) {
-        events = data.map((e: any) => ({
-          id: e.id,
-          title: e.title || e.name,
-          description: e.description,
-          location: e.location,
-          start_date: e.start_date || e.event_date,
-          end_date: e.end_date || e.event_end_date,
-          image: e.banner_image_url || e.cover_image_url || e.image || '',
-          status: e.is_active ? 'Active' : (e.status || 'Closed'),
-          max_participants: e.max_participants || e.maxParticipants,
-          distance_km: e.distance_km || e.distanceKm,
-          reward_config_id: e.reward_config_id || null
-        }));
-      } else {
-        events = [];
-      }
+      // รองรับโครงสร้าง response แบบต่างๆ
+      const rawEvents = Array.isArray(data) ? data : (data.data || []);
+      
+      events = rawEvents.map((e: any) => ({
+        id: e.id,
+        title: e.title || e.name,
+        description: e.description,
+        location: e.location,
+        start_date: e.start_date || e.event_date,
+        end_date: e.end_date || e.event_end_date,
+        image: e.banner_image_url || e.cover_image_url || e.image || '',
+        status: e.is_active ? 'Active' : 'Closed',
+        max_participants: e.max_participants,
+        distance_km: e.distance_km,
+      }));
     } catch (err) {
       console.error('Failed to load events', err);
-      // Fallback to mock
-      events = mockEvents;
+      Swal.fire({ icon: 'error', title: lang.error, text: 'Could not load events' });
     } finally {
       loading = false;
     }
@@ -533,60 +410,51 @@
     loading = true;
     rewards = [];
     rewardConfig = null;
+    
     try {
-      // Try to load reward config for event
-      try {
-        const cfgRes = await api.get(`/api/reward-leaderboards/events/${event.id}/config`);
-        rewardConfig = cfgRes.data || null;
-      } catch (e) {
-        // if endpoint not available, ignore and continue
-        console.warn('No reward config endpoint or failed to load config', e);
-      }
+      // 1. ดึง Config ของ Event นี้
+      // ใช้ endpoints.rewards.config(eventId)
+      const configRes = await api.get(endpoints.rewards.config(event.id));
+      rewardConfig = configRes.data;
 
-      // Load leaderboard entries for event
-      let entries: any[] = [];
-      try {
-        const entRes = await api.get(`/api/reward-leaderboards/events/${event.id}/users`);
-        const body = entRes.data;
-        if (Array.isArray(body)) entries = body;
-        else if (body && Array.isArray(body.users)) entries = body.users;
-      } catch (e) {
-        console.warn('Failed to fetch leaderboard entries, falling back to mock', e);
-        entries = mockRewards as any[];
+      if (rewardConfig && rewardConfig.id) {
+          // 2. ถ้ามี Config ให้ดึง Entries (Leaderboard)
+          // ใช้ endpoints.rewards.entries(configId)
+          const entriesRes = await api.get(endpoints.rewards.entries(rewardConfig.id));
+          const entriesData = entriesRes.data;
+          const rawEntries = Array.isArray(entriesData) ? entriesData : (entriesData.entries || []);
+          
+          rewards = rawEntries.map((r: any) => ({
+             id: r.id,
+             user_id: r.user_id,
+             // รองรับการ map field ที่อาจแตกต่างกันเล็กน้อย
+             user_full_name: r.user_full_name || r.user_name || 'Unknown',
+             user_email: r.user_email || r.email || '',
+             user_nisit_id: r.user_nisit_id || r.nisit_id,
+             user_role: r.user_role || 'participant',
+             total_completions: r.total_completions || 0,
+             rank: r.rank || 0,
+             reward_id: r.reward_id,
+             reward_name: r.reward_name, // Backend อาจส่งชื่อมา หรือต้อง lookup จาก tier
+             reward_tier: r.reward_tier,
+             qualified_at: r.qualified_at,
+             rewarded_at: r.rewarded_at,
+             created_at: r.created_at,
+             updated_at: r.updated_at
+          }));
+      } else {
+          // กรณีไม่มี Config อาจจะยังไม่เคยตั้งค่า
+          console.warn("No reward config found for this event.");
       }
-
-      // Map entries to RewardEntry shape
-      rewards = entries.map((r: any, idx: number) => ({
-        id: r.id || idx + 1,
-        config_id: (rewardConfig && rewardConfig.id) || r.config_id || null,
-        user_id: r.user_id || r.id || 0,
-        total_completions: r.total_completions || r.total_completions || 0,
-        completed_event_participations: r.completed_event_participations || r.event_participations || [],
-        rank: r.rank || r.position || idx + 1,
-        qualified_at: r.qualified_at || r.qualifiedAt || null,
-        reward_id: r.reward_id || r.rewardId || null,
-        reward_tier: r.reward_tier || r.tier || null,
-        rewarded_at: r.rewarded_at || r.rewardedAt || null,
-        created_at: r.created_at || r.createdAt || new Date().toISOString(),
-        updated_at: r.updated_at || r.updatedAt || new Date().toISOString(),
-        user_full_name: r.user_full_name || r.user_name || `${r.first_name || ''} ${r.last_name || ''}`.trim(),
-        user_email: r.user_email || r.email || '',
-        user_role: r.user_role || r.role || 'participant',
-        user_nisit_id: r.user_nisit_id || r.nisit_id || ''
-      }));
 
       calculateStatistics();
       applyFilters();
       view = 'leaderboard';
     } catch (err) {
-      console.error('selectEventForRewards failed', err);
-      Swal.fire({ icon: 'error', title: lang.error, text: 'Failed to load leaderboard data' });
-      // fallback
-      rewards = mockRewards;
-      rewardConfig = mockConfig;
-      calculateStatistics();
-      applyFilters();
+      console.error('Error loading reward data', err);
+      // หาก error 404 ที่ config อาจหมายถึงยังไม่สร้าง ให้แสดงหน้าว่างๆ หรือแจ้งเตือน
       view = 'leaderboard';
+      rewards = [];
     } finally {
       loading = false;
     }
@@ -597,8 +465,8 @@
     filteredRewards = rewards.filter(reward => {
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
-        const match = reward.user_full_name.toLowerCase().includes(q) ||
-                      reward.user_email.toLowerCase().includes(q) ||
+        const match = (reward.user_full_name && reward.user_full_name.toLowerCase().includes(q)) ||
+                      (reward.user_email && reward.user_email.toLowerCase().includes(q)) ||
                       (reward.user_nisit_id && reward.user_nisit_id.toLowerCase().includes(q));
         if (!match) return false;
       }
@@ -611,10 +479,8 @@
       if (selectedTier) {
         if (!reward.reward_tier || reward.reward_tier.toString() !== selectedTier) return false;
       }
-      
       return true;
     });
-    
     currentPage = 1;
   }
   
@@ -632,7 +498,14 @@
   }
   
   // ===== Action Functions =====
+  
+  // STEP 1: Calculate Ranks
   async function calculateRanks() {
+    if (!rewardConfig) {
+        Swal.fire({ icon: 'warning', title: lang.noEvents, text: lang.noConfigDesc });
+        return;
+    }
+
     const result = await Swal.fire({
       title: lang.confirmCalculate,
       text: lang.confirmCalculateText,
@@ -643,76 +516,33 @@
       confirmButtonColor: '#10b981',
       cancelButtonColor: '#64748b'
     });
-    
+
     if (result.isConfirmed) {
       isCalculating = true;
       try {
-        let res;
-        // Prefer config-based calculate endpoint
-        if (rewardConfig && rewardConfig.id) {
-          try {
-            res = await api.post(`/api/reward-leaderboards/configs/${rewardConfig.id}/calculate`);
-          } catch (e) {
-            // fallback to event-based calculate
-            res = await api.post(`/api/reward-leaderboards/events/${selectedEvent?.id}/calculate`);
-          }
-        } else {
-          res = await api.post(`/api/reward-leaderboards/events/${selectedEvent?.id}/calculate`);
-        }
-
-        // If API returns computed entries, use them
-        const body = res && res.data ? res.data : null;
-        let entries: any[] = [];
-        if (body) {
-          if (Array.isArray(body)) entries = body;
-          else if (Array.isArray(body.entries)) entries = body.entries;
-          else if (Array.isArray(body.users)) entries = body.users;
-        }
-
-        if (entries.length > 0) {
-          rewards = entries.map((r: any, idx: number) => ({
-            id: r.id || idx + 1,
-            config_id: (rewardConfig && rewardConfig.id) || r.config_id || null,
-            user_id: r.user_id || r.id || 0,
-            total_completions: r.total_completions || r.total_completions || 0,
-            completed_event_participations: r.completed_event_participations || r.event_participations || [],
-            rank: r.rank || r.position || idx + 1,
-            qualified_at: r.qualified_at || r.qualifiedAt || null,
-            reward_id: r.reward_id || r.rewardId || null,
-            reward_tier: r.reward_tier || r.tier || null,
-            rewarded_at: r.rewarded_at || r.rewardedAt || null,
-            created_at: r.created_at || r.createdAt || new Date().toISOString(),
-            updated_at: r.updated_at || r.updatedAt || new Date().toISOString(),
-            user_full_name: r.user_full_name || r.user_name || `${r.first_name || ''} ${r.last_name || ''}`.trim(),
-            user_email: r.user_email || r.email || '',
-            user_role: r.user_role || r.role || 'participant',
-            user_nisit_id: r.user_nisit_id || r.nisit_id || ''
-          }));
-        } else {
-          // if API didn't return entries, keep previous data but mark top ranks qualified
-          rewards = rewards.map(r => ({
-            ...r,
-            qualified_at: r.rank <= (rewardConfig?.max_reward_recipients || 10) ? new Date().toISOString() : r.qualified_at
-          }));
-        }
-
-        // Optionally update rewardConfig from response
-        if (body && body.config) rewardConfig = body.config;
-
-        calculateStatistics();
-        applyFilters();
+        // ใช้ endpoint calculate-ranks
+        // POST /api/reward-leaderboards/configs/{config_id}/calculate-ranks
+        // หมายเหตุ: ใน endpoints.ts ไม่ได้ระบุ calculate-ranks ชัดเจน อาจจะต้องเพิ่ม หรือใช้ path manual
+        const url = `/api/reward-leaderboards/configs/${rewardConfig.id}/calculate-ranks`;
+        const res = await api.post(url);
+        
+        // Response น่าจะคืนค่า stats หรือ entries ที่อัปเดตแล้ว
+        // เพื่อความชัวร์ ให้ reload data ใหม่
+        await selectEventForRewards(selectedEvent!);
 
         Swal.fire({ icon: 'success', title: lang.success, text: lang.rankCalculated, timer: 2000 });
       } catch (err) {
-        console.error('calculateRanks failed', err);
-        Swal.fire({ icon: 'error', title: lang.error, text: 'Failed to calculate ranks' });
+        showApiError(err, 'Failed to calculate ranks');
       } finally {
         isCalculating = false;
       }
     }
   }
   
+  // STEP 3: Finalize
   async function finalizeLeaderboard() {
+    if (!rewardConfig) return;
+
     const result = await Swal.fire({
       title: lang.confirmFinalize,
       text: lang.confirmFinalizeText,
@@ -723,42 +553,33 @@
       confirmButtonColor: '#ef4444',
       cancelButtonColor: '#64748b'
     });
-    
+
     if (result.isConfirmed) {
       isFinalizing = true;
       try {
-        let res;
-        if (rewardConfig && rewardConfig.id) {
-          try {
-            res = await api.post(`/api/reward-leaderboards/configs/${rewardConfig.id}/finalize`);
-          } catch (e) {
-            res = await api.post(`/api/reward-leaderboards/events/${selectedEvent?.id}/finalize`);
+          // Ensure we have an access token
+          const token = localStorage.getItem('access_token');
+          if (!token) {
+            Swal.fire({ icon: 'warning', title: 'Unauthorized', text: 'Please log in before finalizing.' });
+            isFinalizing = false;
+            return;
           }
-        } else {
-          res = await api.post(`/api/reward-leaderboards/events/${selectedEvent?.id}/finalize`);
-        }
 
-        const body = res && res.data ? res.data : null;
-        if (body && body.config) rewardConfig = body.config;
+          // endpoints.rewards.finalize expects JSON body { config_id: number, confirm: boolean }
+          const payload = { config_id: rewardConfig.id, confirm: true };
+          const url = endpoints.rewards.finalize(rewardConfig.id);
+          console.debug('[rewards] finalize URL:', url);
+          console.debug('[rewards] finalize payload:', payload);
 
-        // Mark rewarded_at for qualified entries
-        rewards = rewards.map(r => ({
-          ...r,
-          rewarded_at: r.qualified_at ? (r.rewarded_at || new Date().toISOString()) : r.rewarded_at
-        }));
-
-        if (rewardConfig) {
-          rewardConfig.is_finalized = true;
-          rewardConfig.finalized_at = rewardConfig.finalized_at || new Date().toISOString();
-        }
-
-        calculateStatistics();
-        applyFilters();
+          // POST to the canonical finalize endpoint with JSON body
+          await api.post(url, payload, { headers: { 'Content-Type': 'application/json' } });
+        
+        // Reload to get updated status (is_finalized = true)
+        await selectEventForRewards(selectedEvent!);
 
         Swal.fire({ icon: 'success', title: lang.success, text: lang.leaderboardFinalized, timer: 2000 });
       } catch (err) {
-        console.error('finalizeLeaderboard failed', err);
-        Swal.fire({ icon: 'error', title: lang.error, text: 'Failed to finalize leaderboard' });
+        showApiError(err, 'Failed to finalize leaderboard');
       } finally {
         isFinalizing = false;
       }
@@ -766,57 +587,9 @@
   }
   
   async function resetLeaderboard() {
-    const result = await Swal.fire({
-      title: lang.confirmReset,
-      text: lang.confirmResetText,
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonText: lang.resetLeaderboard,
-      cancelButtonText: lang.reset,
-      confirmButtonColor: '#ef4444',
-      cancelButtonColor: '#64748b'
-    });
-    
-    if (result.isConfirmed) {
-      isResetting = true;
-      try {
-        let res;
-        if (rewardConfig && rewardConfig.id) {
-          try {
-            res = await api.post(`/api/reward-leaderboards/configs/${rewardConfig.id}/reset`);
-          } catch (e) {
-            res = await api.post(`/api/reward-leaderboards/events/${selectedEvent?.id}/reset`);
-          }
-        } else {
-          res = await api.post(`/api/reward-leaderboards/events/${selectedEvent?.id}/reset`);
-        }
-
-        const body = res && res.data ? res.data : null;
-        if (body && body.config) rewardConfig = body.config;
-
-        if (rewardConfig) {
-          rewardConfig.is_finalized = false;
-          rewardConfig.finalized_at = null;
-        }
-
-        rewards = rewards.map(r => ({
-          ...r,
-          qualified_at: null,
-          rewarded_at: null,
-          reward_id: null,
-          reward_tier: null
-        }));
-        calculateStatistics();
-        applyFilters();
-
-        Swal.fire({ icon: 'success', title: lang.success, text: lang.leaderboardReset, timer: 2000 });
-      } catch (err) {
-        console.error('resetLeaderboard failed', err);
-        Swal.fire({ icon: 'error', title: lang.error, text: 'Failed to reset leaderboard' });
-      } finally {
-        isResetting = false;
-      }
-    }
+     // ฟังก์ชัน Reset อาจจะไม่มี Endpoint โดยตรงในบาง implementation
+     // แต่ถ้ามีให้ใช้ logic ทำนองเดียวกัน
+     Swal.fire({ icon: 'info', title: 'Info', text: 'Feature not available in this version' });
   }
   
   function backToEvents() {
@@ -836,11 +609,8 @@
     showExportMenu = false;
     
     try {
-      if (format === 'csv') {
-        exportAsCSV();
-      } else if (format === 'json') {
-        exportAsJSON();
-      }
+      if (format === 'csv') exportAsCSV();
+      else if (format === 'json') exportAsJSON();
       
       Swal.fire({
         icon: 'success',
@@ -869,16 +639,14 @@
       r.user_nisit_id || '-',
       r.total_completions,
       getStatusLabel(r),
-      r.reward_tier ? `Tier ${r.reward_tier}` : '-',
+      r.reward_name || (r.reward_tier ? `Tier ${r.reward_tier}` : '-'),
       formatTimestamp(r.rewarded_at)
     ]);
-    
     const csv = [
       headers.join(','),
       ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
     ].join('\n');
-    
-    downloadFile(csv, `reward-leaderboard-${Date.now()}.csv`, 'text/csv');
+    downloadFile(csv, `reward-leaderboard-${selectedEvent?.id}-${Date.now()}.csv`, 'text/csv');
   }
   
   function exportAsJSON() {
@@ -888,8 +656,7 @@
       statistics,
       entries: filteredRewards
     }, null, 2);
-    
-    downloadFile(json, `reward-leaderboard-${Date.now()}.json`, 'application/json');
+    downloadFile(json, `reward-leaderboard-${selectedEvent?.id}-${Date.now()}.json`, 'application/json');
   }
   
   function downloadFile(content: string, filename: string, type: string) {
@@ -906,11 +673,9 @@
   function nextPage() {
     if (currentPage < totalPages) currentPage++;
   }
-  
   function prevPage() {
     if (currentPage > 1) currentPage--;
   }
-  
   function jumpToPage(page: number) {
     currentPage = page;
   }
@@ -919,13 +684,18 @@
   onMount(() => {
     loadEvents();
   });
+
+  // Finalize availability: cannot finalize before event end
+  $: _endsAtRaw = (rewardConfig && rewardConfig.ends_at) || (selectedEvent && selectedEvent.end_date) || null;
+  $: endsAt = _endsAtRaw ? new Date(_endsAtRaw) : null;
+  $: isFinalizable = endsAt ? (new Date() >= endsAt) : true;
+  $: endsAtFormatted = endsAt ? endsAt.toLocaleString(currentLang === 'th' ? 'th-TH' : 'en-GB') : null;
 </script>
 
 <svelte:window on:click={closeAllDropdowns} />
 
 <div class="reward-management-container">
   {#if view === 'events'}
-    <!-- Event Selection View -->
     <div class="events-view">
       <div class="page-header">
         <h1>{lang.rewardManagement}</h1>
@@ -949,7 +719,7 @@
           {#each events as event}
             <div class="event-card">
               <div class="event-image-wrapper">
-                <img src={event.image} alt={event.title} class="event-image" />
+                <img src={event.image || 'https://placehold.co/400x200/1e293b/ffffff?text=No+Image'} alt={event.title} class="event-image" />
                 <div class="event-status-badge" class:active={event.status === 'Active'} class:closed={event.status === 'Closed'}>
                   {event.status}
                 </div>
@@ -957,7 +727,7 @@
               
               <div class="event-card-body">
                 <h3 class="event-title">{event.title}</h3>
-                <p class="event-description">{event.description}</p>
+                <p class="event-description">{event.description ? event.description.substring(0, 100) + '...' : ''}</p>
                 
                 <div class="event-meta">
                   <div class="meta-item">
@@ -974,15 +744,6 @@
                     </svg>
                     <span>{formatDateRange(event)}</span>
                   </div>
-                  
-                  {#if event.distance_km}
-                    <div class="meta-item">
-                      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
-                      </svg>
-                      <span>{event.distance_km} km</span>
-                    </div>
-                  {/if}
                 </div>
                 
                 <button class="btn-view-rewards" on:click={() => selectEventForRewards(event)}>
@@ -998,9 +759,7 @@
       {/if}
     </div>
   {:else}
-    <!-- Leaderboard View -->
     <div class="leaderboard-view">
-      <!-- Header -->
       <div class="reward-header">
         <button class="btn-back" on:click={backToEvents}>
           <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1048,7 +807,12 @@
         </div>
       </div>
       
-      <!-- Action Steps -->
+      {#if !rewardConfig && !loading}
+        <div class="empty-state">
+            <p style="color: #ef4444; font-size: 1.2rem; font-weight: bold;">{lang.noConfigTitle}</p>
+            <p>{lang.noConfigDesc}</p>
+        </div>
+      {:else}
       <div class="action-steps">
         <div class="step-card">
           <div class="step-number">1</div>
@@ -1092,7 +856,8 @@
             <button 
               class="btn-step btn-danger" 
               on:click={finalizeLeaderboard}
-              disabled={isFinalizing || rewardConfig?.is_finalized}
+              disabled={isFinalizing || rewardConfig?.is_finalized || !isFinalizable}
+              title={!isFinalizable ? `Cannot finalize before event ends (${endsAtFormatted})` : ''}
             >
               {#if isFinalizing}
                 <div class="btn-spinner"></div>
@@ -1104,33 +869,15 @@
                 {lang.finalizeLeaderboard}
               {/if}
             </button>
+              {#if !isFinalizable}
+                <div class="hint-block" style="margin-top:0.5rem;color:#f97316;font-size:0.95rem;">
+                  Cannot finalize before event ends ({endsAtFormatted})
+                </div>
+              {/if}
           </div>
         </div>
-        
-        {#if rewardConfig?.is_finalized}
-          <div class="step-card step-reset">
-            <div class="step-content">
-              <button 
-                class="btn-step btn-reset" 
-                on:click={resetLeaderboard}
-                disabled={isResetting}
-              >
-                {#if isResetting}
-                  <div class="btn-spinner"></div>
-                  {lang.resetting}
-                {:else}
-                  <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                  </svg>
-                  {lang.resetLeaderboard}
-                {/if}
-              </button>
-            </div>
-          </div>
-        {/if}
       </div>
       
-      <!-- Statistics -->
       <div class="stats-dashboard">
         <div class="stat-card">
           <div class="stat-icon" style="background: rgba(59, 130, 246, 0.1);">
@@ -1179,21 +926,8 @@
             <div class="stat-label">{lang.averageCompletions}</div>
           </div>
         </div>
-        
-        <div class="stat-card">
-          <div class="stat-icon" style="background: rgba(239, 68, 68, 0.1);">
-            <svg width="24" height="24" fill="none" stroke="#ef4444" viewBox="0 0 24 24" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
-            </svg>
-          </div>
-          <div class="stat-info">
-            <div class="stat-value">{statistics.topCompletion}</div>
-            <div class="stat-label">{lang.topCompletion}</div>
-          </div>
-        </div>
       </div>
       
-      <!-- Filters -->
       <div class="filter-section">
         <div class="search-box">
           <svg class="search-icon" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
@@ -1237,7 +971,6 @@
         </button>
       </div>
       
-      <!-- Table -->
       <div class="table-wrapper">
         {#if filteredRewards.length === 0}
           <div class="empty-state">
@@ -1284,7 +1017,9 @@
                     </span>
                   </td>
                   <td class="reward-cell">
-                    {#if entry.reward_tier && rewardConfig}
+                    {#if entry.reward_name}
+                        <span class="tier-badge">{entry.reward_name}</span>
+                    {:else if entry.reward_tier && rewardConfig}
                       {@const tier = rewardConfig.reward_tiers.find(t => t.tier === entry.reward_tier)}
                       {#if tier}
                         <span class="tier-badge">{tier.reward_name}</span>
@@ -1303,7 +1038,6 @@
         {/if}
       </div>
       
-      <!-- Pagination -->
       {#if totalPages > 1}
         <div class="pagination-wrapper">
           <div class="pagination-controls">
@@ -1312,7 +1046,6 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
               </svg>
             </button>
-            
             <div class="page-select-wrapper">
               <button class="page-indicator-box" on:click|stopPropagation={() => showPageDropdown = !showPageDropdown}>
                 <span class="current-page">{currentPage}</span>
@@ -1322,7 +1055,6 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 9l-7 7-7-7"></path>
                 </svg>
               </button>
-              
               {#if showPageDropdown}
                 <div class="click-outside" on:click|stopPropagation={() => showPageDropdown = false}></div>
                 <div class="page-dropdown-list">
@@ -1334,1004 +1066,144 @@
                 </div>
               {/if}
             </div>
-            
             <button class="page-btn" on:click={nextPage} disabled={currentPage === totalPages}>
               <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
               </svg>
             </button>
           </div>
-          
           <div class="showing-text">
             {lang.showingResults} {(currentPage - 1) * itemsPerPage + 1} - {Math.min(currentPage * itemsPerPage, filteredRewards.length)} {lang.of} {filteredRewards.length} {lang.results}
           </div>
         </div>
+      {/if}
       {/if}
     </div>
   {/if}
 </div>
 
 <style>
-  /* ==================== CONTAINER ==================== */
-  .reward-management-container {
-    width: 100%;
-    min-height: 100vh;
-    background: #0f172a;
-  }
-  
-  /* ==================== EVENTS VIEW ==================== */
-  .events-view {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 2rem;
-  }
-  
-  .page-header {
-    margin-bottom: 3rem;
-    text-align: center;
-  }
-  
-  .page-header h1 {
-    font-size: 2.5rem;
-    font-weight: 700;
-    color: #f8fafc;
-    margin-bottom: 0.5rem;
-  }
-  
-  .page-header p {
-    font-size: 1.125rem;
-    color: #94a3b8;
-  }
-  
-  .events-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-    gap: 2rem;
-  }
-  
-  .event-card {
-    background: rgba(30, 41, 59, 0.6);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 20px;
-    overflow: hidden;
-    transition: all 0.3s;
-  }
-  
-  .event-card:hover {
-    transform: translateY(-4px);
-    border-color: rgba(16, 185, 129, 0.4);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
-  }
-  
-  .event-image-wrapper {
-    position: relative;
-    width: 100%;
-    height: 200px;
-    overflow: hidden;
-  }
-  
-  .event-image {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    transition: transform 0.3s;
-  }
-  
-  .event-card:hover .event-image {
-    transform: scale(1.05);
-  }
-  
-  .event-status-badge {
-    position: absolute;
-    top: 1rem;
-    right: 1rem;
-    padding: 0.5rem 1rem;
-    border-radius: 12px;
-    font-size: 0.75rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    backdrop-filter: blur(10px);
-  }
-  
-  .event-status-badge.active {
-    background: rgba(16, 185, 129, 0.9);
-    color: white;
-  }
-  
-  .event-status-badge.closed {
-    background: rgba(100, 116, 139, 0.9);
-    color: white;
-  }
-  
-  .event-card-body {
-    padding: 1.5rem;
-  }
-  
-  .event-title {
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: #f8fafc;
-    margin-bottom: 0.75rem;
-  }
-  
-  .event-description {
-    color: #cbd5e1;
-    font-size: 0.9rem;
-    line-height: 1.6;
-    margin-bottom: 1rem;
-  }
-  
-  .event-meta {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    margin-bottom: 1.5rem;
-  }
-  
-  .meta-item {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    color: #94a3b8;
-    font-size: 0.875rem;
-  }
-  
-  .meta-item svg {
-    flex-shrink: 0;
-    color: #10b981;
-  }
-  
-  .btn-view-rewards {
-    width: 100%;
-    padding: 0.875rem 1.25rem;
-    background: linear-gradient(135deg, #10b981, #059669);
-    border: none;
-    border-radius: 12px;
-    color: white;
-    font-weight: 600;
-    font-size: 0.95rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    cursor: pointer;
-    transition: all 0.3s;
-  }
-  
-  .btn-view-rewards:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(16, 185, 129, 0.4);
-  }
-  
-  /* ==================== LEADERBOARD VIEW ==================== */
-  .leaderboard-view {
-    max-width: 1600px;
-    margin: 0 auto;
-    padding: 2rem;
-  }
-  
-  .reward-header {
-    background: rgba(30, 41, 59, 0.6);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 20px;
-    padding: 1.5rem;
-    margin-bottom: 2rem;
-    display: flex;
-    align-items: center;
-    gap: 1.5rem;
-    flex-wrap: wrap;
-  }
-  
-  .btn-back {
-    background: rgba(100, 116, 139, 0.2);
-    border: 1px solid rgba(100, 116, 139, 0.3);
-    color: #94a3b8;
-    padding: 0.75rem 1.25rem;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-    font-size: 0.9rem;
-    font-weight: 600;
-    transition: all 0.2s;
-    flex-shrink: 0;
-  }
-  
-  .btn-back:hover {
-    background: rgba(100, 116, 139, 0.3);
-    border-color: #64748b;
-    color: #f8fafc;
-    transform: translateX(-2px);
-  }
-  
-  .header-info {
-    flex: 1;
-    min-width: 250px;
-  }
-  
-  .header-info h1 {
-    font-size: 1.75rem;
-    font-weight: 700;
-    color: #f8fafc;
-    margin: 0 0 0.5rem 0;
-  }
-  
-  .event-meta-small {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    font-size: 0.9rem;
-    color: #94a3b8;
-  }
-  
-  .config-status {
-    display: inline-flex;
-    padding: 0.25rem 0.75rem;
-    border-radius: 12px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    background: rgba(100, 116, 139, 0.2);
-    border: 1px solid rgba(100, 116, 139, 0.3);
-    color: #64748b;
-  }
-  
-  .config-status.finalized {
-    background: rgba(16, 185, 129, 0.2);
-    border-color: rgba(16, 185, 129, 0.3);
-    color: #10b981;
-  }
-  
-  .header-actions {
-    display: flex;
-    gap: 0.75rem;
-    position: relative;
-  }
-  
-  .btn-export {
-    background: rgba(59, 130, 246, 0.2);
-    border: 1px solid rgba(59, 130, 246, 0.3);
-    color: #3b82f6;
-    padding: 0.75rem 1.25rem;
-    border-radius: 12px;
-    font-weight: 600;
-    font-size: 0.9rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-  
-  .btn-export:hover {
-    background: rgba(59, 130, 246, 0.3);
-    border-color: #3b82f6;
-  }
-  
-  .btn-export:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  
-  .export-menu {
-    position: absolute;
-    top: calc(100% + 0.5rem);
-    right: 0;
-    background: #1e293b;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    padding: 0.5rem;
-    min-width: 200px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-    z-index: 1000;
-    animation: slideDown 0.2s ease;
-  }
-  
-  .export-option {
-    width: 100%;
-    padding: 0.75rem 1rem;
-    background: transparent;
-    border: none;
-    color: #f8fafc;
-    text-align: left;
-    cursor: pointer;
-    border-radius: 8px;
-    font-size: 0.9rem;
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    transition: all 0.2s;
-  }
-  
-  .export-option:hover {
-    background: rgba(16, 185, 129, 0.1);
-    color: #10b981;
-  }
-  
-  /* ==================== ACTION STEPS ==================== */
-  .action-steps {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 1.5rem;
-    margin-bottom: 2rem;
-  }
-  
-  .step-card {
-    background: rgba(30, 41, 59, 0.6);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 20px;
-    padding: 1.5rem;
-    display: flex;
-    gap: 1rem;
-    transition: all 0.3s;
-  }
-  
-  .step-card:hover {
-    border-color: rgba(16, 185, 129, 0.3);
-    transform: translateY(-2px);
-  }
-  
-  .step-number {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #10b981, #059669);
-    color: white;
-    font-weight: 700;
-    font-size: 1.25rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-  
-  .step-content {
-    flex: 1;
-  }
-  
-  .step-content h3 {
-    font-size: 1rem;
-    font-weight: 700;
-    color: #f8fafc;
-    margin: 0 0 0.5rem 0;
-  }
-  
-  .step-content p {
-    font-size: 0.875rem;
-    color: #94a3b8;
-    line-height: 1.6;
-    margin: 0 0 1rem 0;
-  }
-  
-  .btn-step {
-    width: 100%;
-    padding: 0.75rem 1rem;
-    border: none;
-    border-radius: 12px;
-    color: white;
-    font-weight: 600;
-    font-size: 0.875rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    cursor: pointer;
-    transition: all 0.2s;
-    background: linear-gradient(135deg, #10b981, #059669);
-  }
-  
-  .btn-step:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-  }
-  
-  .btn-step:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  
-  .btn-step.btn-danger {
-    background: linear-gradient(135deg, #ef4444, #dc2626);
-  }
-  
-  .btn-step.btn-danger:hover:not(:disabled) {
-    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
-  }
-  
-  .btn-step.btn-reset {
-    background: linear-gradient(135deg, #64748b, #475569);
-  }
-  
-  .step-status {
-    padding: 0.75rem 1rem;
-    background: rgba(16, 185, 129, 0.1);
-    border: 1px solid rgba(16, 185, 129, 0.2);
-    border-radius: 12px;
-    color: #10b981;
-    font-size: 0.875rem;
-    font-weight: 600;
-    text-align: center;
-  }
-  
-  .step-reset {
-    grid-column: 1 / -1;
-  }
-  
-  .btn-spinner {
-    width: 16px;
-    height: 16px;
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    border-top-color: white;
-    border-radius: 50%;
-    animation: spin 0.6s linear infinite;
-  }
-  
-  /* ==================== STATISTICS ==================== */
-  .stats-dashboard {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1.5rem;
-    margin-bottom: 2rem;
-  }
-  
-  .stat-card {
-    background: rgba(30, 41, 59, 0.6);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 16px;
-    padding: 1.5rem;
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    transition: all 0.3s;
-  }
-  
-  .stat-card:hover {
-    transform: translateY(-2px);
-    border-color: rgba(16, 185, 129, 0.3);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
-  }
-  
-  .stat-icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-  
-  .stat-info {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-  
-  .stat-value {
-    font-size: 2rem;
-    font-weight: 700;
-    color: #f8fafc;
-    line-height: 1;
-  }
-  
-  .stat-label {
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: #94a3b8;
-    line-height: 1;
-  }
-  
-  /* ==================== FILTERS ==================== */
-  .filter-section {
-    background: rgba(30, 41, 59, 0.6);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 20px;
-    padding: 1.5rem;
-    margin-bottom: 2rem;
-    display: flex;
-    gap: 1rem;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-  
-  .search-box {
-    flex: 1;
-    min-width: 250px;
-    position: relative;
-  }
-  
-  .search-icon {
-    position: absolute;
-    left: 1rem;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #64748b;
-    pointer-events: none;
-  }
-  
-  .search-input {
-    width: 100%;
-    padding: 0.75rem 1rem 0.75rem 2.75rem;
-    background: rgba(15, 23, 42, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    color: #f8fafc;
-    font-size: 0.9rem;
-  }
-  
-  .search-input::placeholder {
-    color: #64748b;
-  }
-  
-  .search-input:focus {
-    outline: none;
-    border-color: #10b981;
-    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
-  }
-  
-  .filter-dropdown {
-    position: relative;
-  }
-  
-  .filter-trigger {
-    padding: 0.75rem 1rem;
-    background: rgba(15, 23, 42, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    color: #f8fafc;
-    font-size: 0.9rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-    min-width: 180px;
-    transition: all 0.2s;
-  }
-  
-  .filter-trigger:hover {
-    border-color: rgba(16, 185, 129, 0.4);
-  }
-  
-  .chevron {
-    margin-left: auto;
-    transition: transform 0.2s;
-  }
-  
-  .chevron.rotated {
-    transform: rotate(180deg);
-  }
-  
-  .filter-menu {
-    position: absolute;
-    top: calc(100% + 0.5rem);
-    left: 0;
-    background: #1e293b;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    padding: 0.5rem;
-    min-width: 220px;
-    max-height: 300px;
-    overflow-y: auto;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-    z-index: 1000;
-    animation: slideDown 0.2s ease;
-  }
-  
-  .filter-option {
-    width: 100%;
-    padding: 0.75rem 1rem;
-    background: transparent;
-    border: none;
-    color: #f8fafc;
-    text-align: left;
-    cursor: pointer;
-    border-radius: 8px;
-    font-size: 0.9rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    transition: all 0.2s;
-  }
-  
-  .filter-option:hover {
-    background: rgba(16, 185, 129, 0.1);
-  }
-  
-  .filter-option.selected {
-    background: rgba(16, 185, 129, 0.2);
-    color: #10b981;
-  }
-  
-  .btn-reset-filter {
-    padding: 0.75rem 1.25rem;
-    background: rgba(100, 116, 139, 0.2);
-    border: 1px solid rgba(100, 116, 139, 0.3);
-    border-radius: 12px;
-    color: #94a3b8;
-    font-weight: 600;
-    font-size: 0.9rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-  
-  .btn-reset-filter:hover {
-    background: rgba(100, 116, 139, 0.3);
-    border-color: #64748b;
-  }
-  
-  /* ==================== TABLE ==================== */
-  .table-wrapper {
-    background: rgba(30, 41, 59, 0.6);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 20px;
-    overflow: hidden;
-    margin-bottom: 2rem;
-  }
-  
-  .leaderboard-table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-  
-  .leaderboard-table thead {
-    background: rgba(15, 23, 42, 0.8);
-  }
-  
-  .leaderboard-table th {
-    padding: 1rem;
-    text-align: left;
-    font-weight: 600;
-    font-size: 0.875rem;
-    color: #94a3b8;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  }
-  
-  .leaderboard-table td {
-    padding: 1rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    font-size: 0.9rem;
-    color: #f8fafc;
-  }
-  
-  .leaderboard-table tbody tr {
-    transition: all 0.2s;
-  }
-  
-  .leaderboard-table tbody tr:hover {
-    background: rgba(16, 185, 129, 0.05);
-  }
-  
-  .rank-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 50px;
-    padding: 0.5rem 0.75rem;
-    border-radius: 12px;
-    font-weight: 700;
-    font-size: 0.9rem;
-    color: white;
-  }
-  
-  .name-cell {
-    font-weight: 600;
-    color: #f8fafc;
-  }
-  
-  .email-cell {
-    color: #94a3b8;
-    font-size: 0.85rem;
-  }
-  
-  .nisit-cell {
-    font-family: 'Courier New', monospace;
-    color: #10b981;
-    font-weight: 600;
-  }
-  
-  .role-badge {
-    display: inline-flex;
-    padding: 0.375rem 0.75rem;
-    border-radius: 12px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    background: rgba(168, 85, 247, 0.2);
-    border: 1px solid rgba(168, 85, 247, 0.3);
-    color: #a855f7;
-  }
-  
-  .role-badge.officer {
-    background: rgba(59, 130, 246, 0.2);
-    border-color: rgba(59, 130, 246, 0.3);
-    color: #3b82f6;
-  }
-  
-  .completions-cell {
-    font-weight: 700;
-    font-size: 1.1rem;
-    color: #10b981;
-  }
-  
-  .status-badge {
-    display: inline-flex;
-    padding: 0.375rem 0.75rem;
-    border: 1px solid;
-    border-radius: 12px;
-    font-size: 0.8rem;
-    font-weight: 600;
-  }
-  
-  .tier-badge {
-    display: inline-flex;
-    padding: 0.375rem 0.75rem;
-    border-radius: 12px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    background: rgba(245, 158, 11, 0.2);
-    border: 1px solid rgba(245, 158, 11, 0.3);
-    color: #f59e0b;
-  }
-  
-  .date-cell {
-    color: #94a3b8;
-    font-size: 0.85rem;
-  }
-  
-  .reward-cell {
-    max-width: 200px;
-  }
-  
-  /* ==================== PAGINATION ==================== */
-  .pagination-wrapper {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 1rem;
-  }
-  
-  .pagination-controls {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-  }
-  
-  .page-btn {
-    width: 40px;
-    height: 40px;
-    border-radius: 12px;
-    background: rgba(30, 41, 59, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    color: #f8fafc;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-  
-  .page-btn:hover:not(:disabled) {
-    background: rgba(16, 185, 129, 0.2);
-    border-color: #10b981;
-  }
-  
-  .page-btn:disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
-  }
-  
-  .page-select-wrapper {
-    position: relative;
-  }
-  
-  .page-indicator-box {
-    padding: 0.5rem 1rem;
-    background: rgba(30, 41, 59, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-    font-weight: 600;
-    color: #f8fafc;
-  }
-  
-  .page-indicator-box .sep {
-    color: #64748b;
-  }
-  
-  .dropdown-arrow {
-    transition: transform 0.2s;
-  }
-  
-  .dropdown-arrow.flipped {
-    transform: rotate(180deg);
-  }
-  
-  .page-dropdown-list {
-    position: absolute;
-    top: calc(100% + 0.5rem);
-    left: 50%;
-    transform: translateX(-50%);
-    background: #1e293b;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    padding: 0.5rem;
-    max-height: 300px;
-    overflow-y: auto;
-    min-width: 120px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-    z-index: 1000;
-    animation: slideDown 0.2s ease;
-  }
-  
-  .page-option {
-    width: 100%;
-    padding: 0.75rem 1rem;
-    background: transparent;
-    border: none;
-    color: #f8fafc;
-    text-align: center;
-    cursor: pointer;
-    border-radius: 8px;
-    font-size: 0.9rem;
-    transition: all 0.2s;
-  }
-  
-  .page-option:hover {
-    background: rgba(16, 185, 129, 0.1);
-  }
-  
-  .page-option.active {
-    background: rgba(16, 185, 129, 0.2);
-    color: #10b981;
-    font-weight: 700;
-  }
-  
-  .showing-text {
-    font-size: 0.9rem;
-    color: #94a3b8;
-  }
-  
-  .click-outside {
-    position: fixed;
-    inset: 0;
-    z-index: 999;
-  }
-  
-  /* ==================== LOADING & EMPTY STATES ==================== */
-  .loading-state,
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 4rem 2rem;
-    color: #64748b;
-  }
-  
-  .loading-state svg,
-  .empty-state svg {
-    margin-bottom: 1rem;
-  }
-  
-  .loading-state p,
-  .empty-state p {
-    font-size: 1rem;
-    margin: 0;
-  }
-  
-  .spinner {
-    width: 48px;
-    height: 48px;
-    border: 4px solid rgba(16, 185, 129, 0.1);
-    border-top-color: #10b981;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-  
-  /* ==================== ANIMATIONS ==================== */
-  @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-  
-  @keyframes slideDown {
-    from {
-      opacity: 0;
-      transform: translateY(-10px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-  
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-  
-  /* ==================== RESPONSIVE ==================== */
-  @media (max-width: 1024px) {
-    .stats-dashboard {
-      grid-template-columns: repeat(3, 1fr);
-    }
-    
-    .action-steps {
-      grid-template-columns: 1fr;
-    }
-  }
-  
-  @media (max-width: 768px) {
-    .events-view,
-    .leaderboard-view {
-      padding: 1rem;
-    }
-    
-    .page-header h1 {
-      font-size: 2rem;
-    }
-    
-    .events-grid {
-      grid-template-columns: 1fr;
-    }
-    
-    .reward-header {
-      flex-direction: column;
-      align-items: stretch;
-    }
-    
-    .header-actions {
-      width: 100%;
-    }
-    
-    .btn-export {
-      flex: 1;
-    }
-    
-    .stats-dashboard {
-      grid-template-columns: repeat(2, 1fr);
-    }
-    
-    .filter-section {
-      flex-direction: column;
-      align-items: stretch;
-    }
-    
-    .search-box,
-    .filter-dropdown,
-    .btn-reset-filter {
-      width: 100%;
-    }
-    
-    .table-wrapper {
-      overflow-x: auto;
-    }
-    
-    .leaderboard-table {
-      min-width: 900px;
-    }
-  }
-  
-  @media (max-width: 640px) {
-    .stats-dashboard {
-      grid-template-columns: 1fr;
-    }
-    
-    .header-info h1 {
-      font-size: 1.5rem;
-    }
-  }
+  /* ใช้ Style เดิมทั้งหมด (ไม่ได้เปลี่ยนแปลง CSS) */
+  .reward-management-container { width: 100%; min-height: 100vh; background: #0f172a; }
+  .events-view { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+  .page-header { margin-bottom: 3rem; text-align: center; }
+  .page-header h1 { font-size: 2.5rem; font-weight: 700; color: #f8fafc; margin-bottom: 0.5rem; }
+  .page-header p { font-size: 1.125rem; color: #94a3b8; }
+  .events-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 2rem; }
+  .event-card { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 20px; overflow: hidden; transition: all 0.3s; }
+  .event-card:hover { transform: translateY(-4px); border-color: rgba(16, 185, 129, 0.4); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3); }
+  .event-image-wrapper { position: relative; width: 100%; height: 200px; overflow: hidden; }
+  .event-image { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s; }
+  .event-card:hover .event-image { transform: scale(1.05); }
+  .event-status-badge { position: absolute; top: 1rem; right: 1rem; padding: 0.5rem 1rem; border-radius: 12px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; backdrop-filter: blur(10px); }
+  .event-status-badge.active { background: rgba(16, 185, 129, 0.9); color: white; }
+  .event-status-badge.closed { background: rgba(100, 116, 139, 0.9); color: white; }
+  .event-card-body { padding: 1.5rem; }
+  .event-title { font-size: 1.25rem; font-weight: 700; color: #f8fafc; margin-bottom: 0.75rem; }
+  .event-description { color: #cbd5e1; font-size: 0.9rem; line-height: 1.6; margin-bottom: 1rem; }
+  .event-meta { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.5rem; }
+  .meta-item { display: flex; align-items: center; gap: 0.5rem; color: #94a3b8; font-size: 0.875rem; }
+  .meta-item svg { flex-shrink: 0; color: #10b981; }
+  .btn-view-rewards { width: 100%; padding: 0.875rem 1.25rem; background: linear-gradient(135deg, #10b981, #059669); border: none; border-radius: 12px; color: white; font-weight: 600; font-size: 0.95rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem; cursor: pointer; transition: all 0.3s; }
+  .btn-view-rewards:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(16, 185, 129, 0.4); }
+  .leaderboard-view { max-width: 1600px; margin: 0 auto; padding: 2rem; }
+  .reward-header { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 20px; padding: 1.5rem; margin-bottom: 2rem; display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; }
+  .btn-back { background: rgba(100, 116, 139, 0.2); border: 1px solid rgba(100, 116, 139, 0.3); color: #94a3b8; padding: 0.75rem 1.25rem; border-radius: 12px; display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.9rem; font-weight: 600; transition: all 0.2s; flex-shrink: 0; }
+  .btn-back:hover { background: rgba(100, 116, 139, 0.3); border-color: #64748b; color: #f8fafc; transform: translateX(-2px); }
+  .header-info { flex: 1; min-width: 250px; }
+  .header-info h1 { font-size: 1.75rem; font-weight: 700; color: #f8fafc; margin: 0 0 0.5rem 0; }
+  .event-meta-small { display: flex; align-items: center; gap: 1rem; font-size: 0.9rem; color: #94a3b8; }
+  .config-status { display: inline-flex; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; background: rgba(100, 116, 139, 0.2); border: 1px solid rgba(100, 116, 139, 0.3); color: #64748b; }
+  .config-status.finalized { background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.3); color: #10b981; }
+  .header-actions { display: flex; gap: 0.75rem; position: relative; }
+  .btn-export { background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.3); color: #3b82f6; padding: 0.75rem 1.25rem; border-radius: 12px; font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer; transition: all 0.2s; }
+  .btn-export:hover { background: rgba(59, 130, 246, 0.3); border-color: #3b82f6; }
+  .btn-export:disabled { opacity: 0.5; cursor: not-allowed; }
+  .export-menu { position: absolute; top: calc(100% + 0.5rem); right: 0; background: #1e293b; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 0.5rem; min-width: 200px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); z-index: 1000; animation: slideDown 0.2s ease; }
+  .export-option { width: 100%; padding: 0.75rem 1rem; background: transparent; border: none; color: #f8fafc; text-align: left; cursor: pointer; border-radius: 8px; font-size: 0.9rem; display: flex; align-items: center; gap: 0.75rem; transition: all 0.2s; }
+  .export-option:hover { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+  .action-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+  .step-card { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 20px; padding: 1.5rem; display: flex; gap: 1rem; transition: all 0.3s; }
+  .step-card:hover { border-color: rgba(16, 185, 129, 0.3); transform: translateY(-2px); }
+  .step-number { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #10b981, #059669); color: white; font-weight: 700; font-size: 1.25rem; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .step-content { flex: 1; }
+  .step-content h3 { font-size: 1rem; font-weight: 700; color: #f8fafc; margin: 0 0 0.5rem 0; }
+  .step-content p { font-size: 0.875rem; color: #94a3b8; line-height: 1.6; margin: 0 0 1rem 0; }
+  .btn-step { width: 100%; padding: 0.75rem 1rem; border: none; border-radius: 12px; color: white; font-weight: 600; font-size: 0.875rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem; cursor: pointer; transition: all 0.2s; background: linear-gradient(135deg, #10b981, #059669); }
+  .btn-step:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3); }
+  .btn-step:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-step.btn-danger { background: linear-gradient(135deg, #ef4444, #dc2626); }
+  .btn-step.btn-danger:hover:not(:disabled) { box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3); }
+  .btn-step.btn-reset { background: linear-gradient(135deg, #64748b, #475569); }
+  .step-status { padding: 0.75rem 1rem; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 12px; color: #10b981; font-size: 0.875rem; font-weight: 600; text-align: center; }
+  .step-reset { grid-column: 1 / -1; }
+  .btn-spinner { width: 16px; height: 16px; border: 2px solid rgba(255, 255, 255, 0.3); border-top-color: white; border-radius: 50%; animation: spin 0.6s linear infinite; }
+  .stats-dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+  .stat-card { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 1.5rem; display: flex; align-items: center; gap: 1rem; transition: all 0.3s; }
+  .stat-card:hover { transform: translateY(-2px); border-color: rgba(16, 185, 129, 0.3); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3); }
+  .stat-icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .stat-info { display: flex; flex-direction: column; gap: 0.25rem; }
+  .stat-value { font-size: 2rem; font-weight: 700; color: #f8fafc; line-height: 1; }
+  .stat-label { font-size: 0.875rem; font-weight: 500; color: #94a3b8; line-height: 1; }
+  .filter-section { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 20px; padding: 1.5rem; margin-bottom: 2rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+  .search-box { flex: 1; min-width: 250px; position: relative; }
+  .search-icon { position: absolute; left: 1rem; top: 50%; transform: translateY(-50%); color: #64748b; pointer-events: none; }
+  .search-input { width: 100%; padding: 0.75rem 1rem 0.75rem 2.75rem; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; color: #f8fafc; font-size: 0.9rem; }
+  .search-input::placeholder { color: #64748b; }
+  .search-input:focus { outline: none; border-color: #10b981; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1); }
+  .filter-dropdown { position: relative; }
+  .filter-trigger { padding: 0.75rem 1rem; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; color: #f8fafc; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer; min-width: 180px; transition: all 0.2s; }
+  .filter-trigger:hover { border-color: rgba(16, 185, 129, 0.4); }
+  .chevron { margin-left: auto; transition: transform 0.2s; }
+  .chevron.rotated { transform: rotate(180deg); }
+  .filter-menu { position: absolute; top: calc(100% + 0.5rem); left: 0; background: #1e293b; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 0.5rem; min-width: 220px; max-height: 300px; overflow-y: auto; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); z-index: 1000; animation: slideDown 0.2s ease; }
+  .filter-option { width: 100%; padding: 0.75rem 1rem; background: transparent; border: none; color: #f8fafc; text-align: left; cursor: pointer; border-radius: 8px; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; transition: all 0.2s; }
+  .filter-option:hover { background: rgba(16, 185, 129, 0.1); }
+  .filter-option.selected { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+  .btn-reset-filter { padding: 0.75rem 1.25rem; background: rgba(100, 116, 139, 0.2); border: 1px solid rgba(100, 116, 139, 0.3); border-radius: 12px; color: #94a3b8; font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer; transition: all 0.2s; }
+  .btn-reset-filter:hover { background: rgba(100, 116, 139, 0.3); border-color: #64748b; }
+  .table-wrapper { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 20px; overflow: hidden; margin-bottom: 2rem; }
+  .leaderboard-table { width: 100%; border-collapse: collapse; }
+  .leaderboard-table thead { background: rgba(15, 23, 42, 0.8); }
+  .leaderboard-table th { padding: 1rem; text-align: left; font-weight: 600; font-size: 0.875rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+  .leaderboard-table td { padding: 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.05); font-size: 0.9rem; color: #f8fafc; }
+  .leaderboard-table tbody tr { transition: all 0.2s; }
+  .leaderboard-table tbody tr:hover { background: rgba(16, 185, 129, 0.05); }
+  .rank-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 50px; padding: 0.5rem 0.75rem; border-radius: 12px; font-weight: 700; font-size: 0.9rem; color: white; }
+  .name-cell { font-weight: 600; color: #f8fafc; }
+  .email-cell { color: #94a3b8; font-size: 0.85rem; }
+  .nisit-cell { font-family: 'Courier New', monospace; color: #10b981; font-weight: 600; }
+  .role-badge { display: inline-flex; padding: 0.375rem 0.75rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; background: rgba(168, 85, 247, 0.2); border: 1px solid rgba(168, 85, 247, 0.3); color: #a855f7; }
+  .role-badge.officer { background: rgba(59, 130, 246, 0.2); border-color: rgba(59, 130, 246, 0.3); color: #3b82f6; }
+  .completions-cell { font-weight: 700; font-size: 1.1rem; color: #10b981; }
+  .status-badge { display: inline-flex; padding: 0.375rem 0.75rem; border: 1px solid; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
+  .tier-badge { display: inline-flex; padding: 0.375rem 0.75rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.3); color: #f59e0b; }
+  .date-cell { color: #94a3b8; font-size: 0.85rem; }
+  .reward-cell { max-width: 200px; }
+  .pagination-wrapper { display: flex; flex-direction: column; align-items: center; gap: 1rem; }
+  .pagination-controls { display: flex; align-items: center; gap: 1rem; }
+  .page-btn { width: 40px; height: 40px; border-radius: 12px; background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); color: #f8fafc; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
+  .page-btn:hover:not(:disabled) { background: rgba(16, 185, 129, 0.2); border-color: #10b981; }
+  .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .page-select-wrapper { position: relative; }
+  .page-indicator-box { padding: 0.5rem 1rem; background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-weight: 600; color: #f8fafc; }
+  .page-indicator-box .sep { color: #64748b; }
+  .dropdown-arrow { transition: transform 0.2s; }
+  .dropdown-arrow.flipped { transform: rotate(180deg); }
+  .page-dropdown-list { position: absolute; top: calc(100% + 0.5rem); left: 50%; transform: translateX(-50%); background: #1e293b; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 0.5rem; max-height: 300px; overflow-y: auto; min-width: 120px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); z-index: 1000; animation: slideDown 0.2s ease; }
+  .page-option { width: 100%; padding: 0.75rem 1rem; background: transparent; border: none; color: #f8fafc; text-align: center; cursor: pointer; border-radius: 8px; font-size: 0.9rem; transition: all 0.2s; }
+  .page-option:hover { background: rgba(16, 185, 129, 0.1); }
+  .page-option.active { background: rgba(16, 185, 129, 0.2); color: #10b981; font-weight: 700; }
+  .showing-text { font-size: 0.9rem; color: #94a3b8; }
+  .click-outside { position: fixed; inset: 0; z-index: 999; }
+  .loading-state, .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4rem 2rem; color: #64748b; }
+  .loading-state svg, .empty-state svg { margin-bottom: 1rem; }
+  .loading-state p, .empty-state p { font-size: 1rem; margin: 0; }
+  .spinner { width: 48px; height: 48px; border: 4px solid rgba(16, 185, 129, 0.1); border-top-color: #10b981; border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (max-width: 1024px) { .stats-dashboard { grid-template-columns: repeat(3, 1fr); } .action-steps { grid-template-columns: 1fr; } }
+  @media (max-width: 768px) { .events-view, .leaderboard-view { padding: 1rem; } .page-header h1 { font-size: 2rem; } .events-grid { grid-template-columns: 1fr; } .reward-header { flex-direction: column; align-items: stretch; } .header-actions { width: 100%; } .btn-export { flex: 1; } .stats-dashboard { grid-template-columns: repeat(2, 1fr); } .filter-section { flex-direction: column; align-items: stretch; } .search-box, .filter-dropdown, .btn-reset-filter { width: 100%; } .table-wrapper { overflow-x: auto; } .leaderboard-table { min-width: 900px; } }
+  @media (max-width: 640px) { .stats-dashboard { grid-template-columns: 1fr; } .header-info h1 { font-size: 1.5rem; } }
 </style>
