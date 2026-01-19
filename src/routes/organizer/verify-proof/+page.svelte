@@ -28,9 +28,11 @@
   
   const translations = {
     th: {
+      proofVerification: "ตรวจสอบหลักฐาน",
+      selectEvent: "เลือกกิจกรรม",
       noEventsFound: "ไม่พบกิจกรรม",
       verifySubmissions: "ตรวจสอบการส่ง",
-      backToEvents: "กลับไปหน้ากิจกรรม",
+      backToEvents: "กลับไปหน้างาน",
       pending: "รอการตรวจสอบ",
       approved: "อนุมัติแล้ว",
       rejected: "ปฏิเสธแล้ว",
@@ -52,8 +54,22 @@
       approveSuccess: "อนุมัติสำเร็จ",
       rejectSuccess: "ปฏิเสธสำเร็จ",
       error: "เกิดข้อผิดพลาด",
+      totalSubmissions: "ทั้งหมด",
+      pendingReview: "รอตรวจสอบ",
+      approvedToday: "อนุมัติวันนี้",
+      rejectedToday: "ปฏิเสธวันนี้",
+      loading: "กำลังโหลด...",
+      showingResults: "แสดง",
+      of: "จาก",
+      results: "รายการ",
+      status: "สถานะ",
+      submittedAt: "ส่งเมื่อ",
+      actions: "การกระทำ",
+      viewImage: "ดูรูปภาพ",
     },
     en: {
+      proofVerification: "Proof Verification",
+      selectEvent: "Select Event",
       noEventsFound: "No events found",
       verifySubmissions: "Verify Submissions",
       backToEvents: "Back to Events",
@@ -78,6 +94,18 @@
       approveSuccess: "Approved successfully",
       rejectSuccess: "Rejected successfully",
       error: "Error occurred",
+      totalSubmissions: "Total",
+      pendingReview: "Pending",
+      approvedToday: "Approved Today",
+      rejectedToday: "Rejected Today",
+      loading: "Loading...",
+      showingResults: "Showing",
+      of: "of",
+      results: "results",
+      status: "Status",
+      submittedAt: "Submitted At",
+      actions: "Actions",
+      viewImage: "View Image",
     },
   };
   
@@ -108,7 +136,37 @@
     submittedAt: string;
   }
   
+  interface Statistics {
+    total: number;
+    pending: number;
+    approvedToday: number;
+    rejectedToday: number;
+  }
+  
+  // ==================== MOCK DATA (เพิ่มส่วนนี้) ====================
+  const MOCK_EVENTS: Event[] = [
+    {
+      id: "1", title: "KU Fun Run 2026", description: "วิ่งสนุกๆ รอบรั้วนนทรี", location: "Kasetsart University",
+      startDate: "2026-03-01", endDate: "2026-03-01", startTime: "05:00", endTime: "09:00",
+      status: "Active", image: "https://placehold.co/600x400/1e293b/10b981?text=KU+Run", pendingCount: 5
+    },
+    {
+      id: "2", title: "Engineering Run", description: "วิ่งเกียร์สัมพันธ์", location: "Engineering Faculty",
+      startDate: "2026-04-10", endDate: "2026-04-10", startTime: "06:00", endTime: "10:00",
+      status: "Closed", image: "https://placehold.co/600x400/1e293b/3b82f6?text=Eng+Run", pendingCount: 0
+    }
+  ];
+
+  const MOCK_SUBMISSIONS: Submission[] = [
+    { id: "s1", runnerName: "Somchai Jaidee", odySd: "6410501001", email: "somchai@ku.th", proofImage: "https://placehold.co/400x600/1e293b/10b981?text=Proof+1", status: "Pending", submittedAt: new Date().toISOString() },
+    { id: "s2", runnerName: "Suda Rakrean", odySd: "6510502055", email: "suda@ku.th", proofImage: "https://placehold.co/400x600/1e293b/3b82f6?text=Proof+2", status: "Pending", submittedAt: new Date(Date.now() - 3600000).toISOString() },
+    { id: "s3", runnerName: "Mana Manee", odySd: "6310503322", email: "mana@ku.th", proofImage: "https://placehold.co/400x600/1e293b/ef4444?text=Proof+3", status: "Approved", submittedAt: new Date(Date.now() - 7200000).toISOString() },
+    { id: "s4", runnerName: "Piti Pity", odySd: "6610504111", email: "piti@ku.th", proofImage: "https://placehold.co/400x600/1e293b/f59e0b?text=Proof+4", status: "Rejected", submittedAt: new Date(Date.now() - 86400000).toISOString() },
+    { id: "s5", runnerName: "Chujai Dee", odySd: "6410505999", email: "chujai@ku.th", proofImage: "https://placehold.co/400x600/1e293b/10b981?text=Proof+5", status: "Pending", submittedAt: new Date().toISOString() }
+  ];
+
   // State
+  let view: 'events' | 'submissions' = 'events';
   let events: Event[] = [];
   let selectedEvent: Event | null = null;
   let submissions: Submission[] = [];
@@ -149,6 +207,14 @@
   
   // Available dates for filtering
   let availableDates: { value: string; display: string }[] = [];
+  
+  // Statistics
+  let statistics: Statistics = {
+    total: 0,
+    pending: 0,
+    approvedToday: 0,
+    rejectedToday: 0
+  };
   
   // Computed
   $: paginatedEvents = events.slice((eventsPage - 1) * eventsPerPage, eventsPage * eventsPerPage);
@@ -213,6 +279,17 @@
     return `${start.toLocaleDateString(locale, options)} - ${end.toLocaleDateString(locale, options)}`;
   }
   
+  function formatTimestamp(timestamp: string): string {
+    const date = new Date(timestamp);
+    return date.toLocaleDateString(currentLang === "th" ? "th-TH" : "en-GB", {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+  
   function translateStatus(status: string): string {
     const map: any = {
       Active: currentLang === "th" ? "เปิดใช้งาน" : "Active",
@@ -222,16 +299,36 @@
     return map[status] || status;
   }
   
+  function calculateStatistics() {
+    statistics.total = submissions.length;
+    statistics.pending = submissions.filter(s => s.status === "Pending").length;
+    
+    const today = new Date().toDateString();
+    statistics.approvedToday = submissions.filter(s => {
+      return s.status === "Approved" && new Date(s.submittedAt).toDateString() === today;
+    }).length;
+    statistics.rejectedToday = submissions.filter(s => {
+      return s.status === "Rejected" && new Date(s.submittedAt).toDateString() === today;
+    }).length;
+  }
+  
   async function loadEvents() {
     loading = true;
     try {
+      // ลองเรียก API ก่อน
       const response = await api.get('/api/events');
-      events = response.data.map((e: any) => ({
-        ...e,
-        pendingCount: e.pending_proof_count || 0
-      }));
+      if (response.data && response.data.length > 0) {
+        events = response.data.map((e: any) => ({
+          ...e,
+          pendingCount: e.pending_proof_count || 0
+        }));
+      } else {
+        // ถ้าไม่มีข้อมูล ให้ใช้ Mockup
+        events = MOCK_EVENTS;
+      }
     } catch (error) {
-      console.error('Failed to load events:', error);
+      console.warn('Failed to load events, using mockup:', error);
+      events = MOCK_EVENTS;
     } finally {
       loading = false;
     }
@@ -239,6 +336,7 @@
   
   async function selectEvent(event: Event) {
     selectedEvent = event;
+    view = 'submissions';
     await loadSubmissions(event.id);
   }
   
@@ -246,7 +344,12 @@
     loading = true;
     try {
       const response = await api.get(`/api/events/${eventId}/proof-submissions`);
-      submissions = response.data;
+      if (response.data && response.data.length > 0) {
+          submissions = response.data;
+      } else {
+          // ถ้าไม่มีข้อมูล ใช้ Mockup
+          submissions = MOCK_SUBMISSIONS;
+      }
       
       // Extract available dates
       const dates = [...new Set(submissions.map(s => s.submittedAt.split('T')[0]))];
@@ -258,14 +361,19 @@
           year: 'numeric'
         })
       }));
+      
+      calculateStatistics();
     } catch (error) {
-      console.error('Failed to load submissions:', error);
+      console.warn('Failed to load submissions, using mockup:', error);
+      submissions = MOCK_SUBMISSIONS;
+      calculateStatistics();
     } finally {
       loading = false;
     }
   }
   
   function backToEventsList() {
+    view = 'events';
     selectedEvent = null;
     submissions = [];
     resetFilters();
@@ -288,9 +396,9 @@
       icon: 'question',
       showCancelButton: true,
       confirmButtonColor: '#10b981',
-      cancelButtonColor: '#6b7280',
+      cancelButtonColor: '#64748b',
       confirmButtonText: lang.approve,
-      cancelButtonText: lang.reject,
+      cancelButtonText: 'Cancel',
       background: '#1e293b',
       color: '#fff',
     });
@@ -309,18 +417,22 @@
           showConfirmButton: false
         });
         
-        // Reload submissions
         if (selectedEvent) {
           await loadSubmissions(selectedEvent.id);
         }
       } catch (error) {
+        // Mock success action
+        sub.status = "Approved";
+        submissions = [...submissions]; // Trigger update
+        calculateStatistics();
         Swal.fire({
-          title: lang.error,
-          text: 'Failed to approve submission',
-          icon: 'error',
+          title: lang.approveSuccess + " (Mock)",
+          icon: 'success',
           background: '#1e293b',
           color: '#fff',
-          confirmButtonColor: '#10b981'
+          confirmButtonColor: '#10b981',
+          timer: 1500,
+          showConfirmButton: false
         });
       }
     }
@@ -333,9 +445,9 @@
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#ef4444',
-      cancelButtonColor: '#6b7280',
+      cancelButtonColor: '#64748b',
       confirmButtonText: lang.reject,
-      cancelButtonText: lang.apply,
+      cancelButtonText: 'Cancel',
       background: '#1e293b',
       color: '#fff',
     });
@@ -354,18 +466,22 @@
           showConfirmButton: false
         });
         
-        // Reload submissions
         if (selectedEvent) {
           await loadSubmissions(selectedEvent.id);
         }
       } catch (error) {
+        // Mock success action
+        sub.status = "Rejected";
+        submissions = [...submissions]; // Trigger update
+        calculateStatistics();
         Swal.fire({
-          title: lang.error,
-          text: 'Failed to reject submission',
-          icon: 'error',
+          title: lang.rejectSuccess + " (Mock)",
+          icon: 'success',
           background: '#1e293b',
           color: '#fff',
-          confirmButtonColor: '#10b981'
+          confirmButtonColor: '#10b981',
+          timer: 1500,
+          showConfirmButton: false
         });
       }
     }
@@ -395,7 +511,7 @@
             newSubmissionsCount = newCount - oldCount;
           }
         }
-      }, 5000); // Refresh every 5 seconds
+      }, 5000);
     } else {
       isConnected = false;
       if (autoRefreshInterval) {
@@ -411,7 +527,6 @@
     }
   }
   
-  // Pagination
   function prevEventsPage() {
     if (eventsPage > 1) eventsPage--;
   }
@@ -428,6 +543,14 @@
     if (submissionsPage < totalSubmissionsPages) submissionsPage++;
   }
   
+  function closeAllDropdowns() {
+    showStatusDropdown = false;
+    showFromDateDropdown = false;
+    showToDateDropdown = false;
+    showEventsPageDropdown = false;
+    showSubmissionsPageDropdown = false;
+  }
+  
   onMount(() => {
     loadEvents();
   });
@@ -439,62 +562,73 @@
   });
 </script>
 
-<svelte:window on:click={() => {
-  showEventsPageDropdown = false;
-  showSubmissionsPageDropdown = false;
-  showStatusDropdown = false;
-  showFromDateDropdown = false;
-  showToDateDropdown = false;
-}} />
+<svelte:window on:click={closeAllDropdowns} />
 
-<div class="logs-container">
-  {#if !selectedEvent}
-    <!-- EVENT SELECTION GRID -->
-    <div class="grid-section">
-      {#if paginatedEvents.length === 0}
+<div class="proof-verification-container">
+  {#if view === 'events'}
+    <div class="events-view">
+      <div class="page-header">
+        <h1>{lang.proofVerification}</h1>
+        <p>{lang.selectEvent}</p>
+      </div>
+      
+      {#if loading}
+        <div class="loading-state">
+          <div class="spinner"></div>
+          <p>{lang.loading}</p>
+        </div>
+      {:else if paginatedEvents.length === 0}
         <div class="empty-state">
-          <svg width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg width="64" height="64" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
           </svg>
           <p>{lang.noEventsFound}</p>
         </div>
       {:else}
-        <div class="grid">
+        <div class="events-grid">
           {#each paginatedEvents as event (event.id)}
-            <div class="glass-card">
-              <div class="card-img-wrapper">
-                <img src={event.image || "https://placehold.co/400x200/1e293b/64748b?text=No+Image"} alt={event.title} class="card-img" loading="lazy" on:error={(e) => { e.currentTarget.src = "https://placehold.co/400x200/1e293b/64748b?text=Image+Unavailable"; }} />
+            <div class="event-card">
+              <div class="event-image-wrapper">
+                <img 
+                  src={event.image || "https://placehold.co/400x200/1e293b/64748b?text=No+Image"} 
+                  alt={event.title} 
+                  class="event-image" 
+                  loading="lazy"
+                  on:error={(e) => { e.currentTarget.src = "https://placehold.co/400x200/1e293b/64748b?text=Image+Unavailable"; }}
+                />
                 {#if event.pendingCount && event.pendingCount > 0}
                   <div class="pending-badge-overlay">{event.pendingCount} Pending</div>
                 {/if}
-              </div>
-              <div class="card-body">
-                <div class="card-header">
-                  <h3>{event.title}</h3>
-                  <div class="status-group">
-                    <span class="status-badge" class:status-active={event.status === "Active"} class:status-closed={event.status === "Closed"} class:status-draft={event.status === "Draft"}>{translateStatus(event.status)}</span>
-                  </div>
+                <div class="event-status-badge" class:active={event.status === "Active"} class:closed={event.status === "Closed"} class:draft={event.status === "Draft"}>
+                  {translateStatus(event.status)}
                 </div>
+              </div>
+              
+              <div class="event-card-body">
+                <h3 class="event-title">{event.title}</h3>
                 {#if event.description}
-                  <p class="event-description-short">{event.description.substring(0, 80)}{event.description.length > 80 ? "..." : ""}</p>
+                  <p class="event-description">{event.description.substring(0, 80)}{event.description.length > 80 ? "..." : ""}</p>
                 {/if}
-                <div class="event-simple-meta">
-                  <div class="meta-row">
-                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                
+                <div class="event-meta">
+                  <div class="meta-item">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
                       <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
                     </svg>
                     <span>{event.location}</span>
                   </div>
-                  <div class="meta-row">
-                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                  
+                  <div class="meta-item">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                     </svg>
                     <span>{formatDateRange(event, currentLang)}</span>
                   </div>
+                  
                   {#if event.startTime && event.endTime}
-                    <div class="meta-row">
-                      <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                    <div class="meta-item">
+                      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                       </svg>
                       <span>{event.startTime} - {event.endTime}</span>
@@ -502,14 +636,12 @@
                   {/if}
                 </div>
 
-                <div class="action-buttons">
-                  <button class="action-btn btn-view" on:click={() => selectEvent(event)}>
-                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    {lang.verifySubmissions}
-                  </button>
-                </div>
+                <button class="btn-view-submissions" on:click={() => selectEvent(event)}>
+                  <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                  </svg>
+                  {lang.verifySubmissions}
+                </button>
               </div>
             </div>
           {/each}
@@ -519,27 +651,35 @@
           <div class="pagination-wrapper">
             <div class="pagination-controls">
               <button class="page-btn" on:click={prevEventsPage} disabled={eventsPage === 1}>
-                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                </svg>
               </button>
               
               <div class="page-select-wrapper">
-                <button class="page-indicator-box clickable" on:click|stopPropagation={() => (showEventsPageDropdown = !showEventsPageDropdown)}>
+                <button class="page-indicator-box" on:click|stopPropagation={() => (showEventsPageDropdown = !showEventsPageDropdown)}>
                   <span class="current-page">{eventsPage}</span>
                   <span class="sep">/</span>
                   <span class="total-page">{totalEventsPages}</span>
-                  <svg class="dropdown-arrow" class:flipped={showEventsPageDropdown} width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 9l-7 7-7-7"></path></svg>
+                  <svg class="dropdown-arrow" class:flipped={showEventsPageDropdown} width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 9l-7 7-7-7"></path>
+                  </svg>
                 </button>
                 {#if showEventsPageDropdown}
                   <div class="page-dropdown-list" on:click|stopPropagation>
                     {#each Array(totalEventsPages) as _, i}
-                      <button class="page-dropdown-item" class:active={eventsPage === i + 1} on:click={() => { eventsPage = i + 1; showEventsPageDropdown = false; }}>Page {i + 1}</button>
+                      <button class="page-option" class:active={eventsPage === i + 1} on:click={() => { eventsPage = i + 1; showEventsPageDropdown = false; }}>
+                        Page {i + 1}
+                      </button>
                     {/each}
                   </div>
                 {/if}
               </div>
               
               <button class="page-btn" on:click={nextEventsPage} disabled={eventsPage === totalEventsPages}>
-                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                </svg>
               </button>
             </div>
           </div>
@@ -547,163 +687,238 @@
       {/if}
     </div>
   {:else}
-    <!-- SUBMISSIONS DETAIL VIEW -->
-    <div class="logs-detail">
-      <!-- Header -->
-      <div class="logs-header">
-        <button class="btn-back-logs" on:click={backToEventsList}>
-          <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+    <div class="submissions-view">
+      <div class="submissions-header">
+        <button class="btn-back" on:click={backToEventsList}>
+          <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+          </svg>
           {lang.backToEvents}
         </button>
         
-        <div class="selected-event-info">
-          <h3>{selectedEvent.title}</h3>
+        <div class="header-info">
+          <h1>{selectedEvent?.title}</h1>
           <div class="event-meta-small">
             <span>
-              <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-              {selectedEvent.location}
+              <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+              </svg>
+              {selectedEvent?.location}
             </span>
             <span>
-              <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+              <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+              </svg>
               {formatDateRange(selectedEvent, currentLang)}
             </span>
-            {#if selectedEvent.startTime && selectedEvent.endTime}
+            {#if selectedEvent?.startTime && selectedEvent?.endTime}
               <span>
-                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
                 {selectedEvent.startTime} - {selectedEvent.endTime}
               </span>
             {/if}
-            <span class="status-badge-inline" class:active={selectedEvent.status === "Active"}>{selectedEvent.status}</span>
+            <span class="status-badge-inline" class:active={selectedEvent?.status === "Active"}>
+              {selectedEvent?.status}
+            </span>
           </div>
         </div>
         
-        <div class="logs-action-buttons">
+        <div class="header-actions">
           <div class="realtime-controls">
             {#if newSubmissionsCount > 0}
               <button class="btn-new-logs" on:click={refreshSubmissions}>
-                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
                 {newSubmissionsCount} New
               </button>
             {/if}
-            <button class="btn-auto-refresh" class:active={autoRefreshEnabled} on:click={toggleAutoRefresh} title={autoRefreshEnabled ? "Auto-refresh ON" : "Auto-refresh OFF"}>
-              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            <button 
+              class="btn-auto-refresh" 
+              class:active={autoRefreshEnabled} 
+              on:click={toggleAutoRefresh}
+              title={autoRefreshEnabled ? "Auto-refresh ON" : "Auto-refresh OFF"}
+            >
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+              </svg>
               {#if isConnected}<span class="live-dot"></span>{/if}
             </button>
           </div>
         </div>
       </div>
 
-      <!-- Stats -->
-      <div class="stats-dashboard-single-row">
-        <div class="stat-card-compact pending">
-          <div class="stat-icon-compact">
-            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+      <div class="stats-dashboard">
+        <div class="stat-card" style="border-color: rgba(59, 130, 246, 0.3);">
+          <div class="stat-icon" style="background: rgba(59, 130, 246, 0.1);">
+            <svg width="24" height="24" fill="none" stroke="#3b82f6" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value">{statistics.total}</div>
+            <div class="stat-label">{lang.totalSubmissions}</div>
+          </div>
+        </div>
+        
+        <div class="stat-card" style="border-color: rgba(245, 158, 11, 0.3);">
+          <div class="stat-icon" style="background: rgba(245, 158, 11, 0.1);">
+            <svg width="24" height="24" fill="none" stroke="#f59e0b" viewBox="0 0 24 24" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
             </svg>
           </div>
-          <div class="stat-info-compact">
-            <div class="stat-value-compact">{submissions.length}</div>
-            <div class="stat-label-compact">Pending</div>
+          <div class="stat-info">
+            <div class="stat-value">{statistics.pending}</div>
+            <div class="stat-label">{lang.pendingReview}</div>
+          </div>
+        </div>
+        
+        <div class="stat-card" style="border-color: rgba(16, 185, 129, 0.3);">
+          <div class="stat-icon" style="background: rgba(16, 185, 129, 0.1);">
+            <svg width="24" height="24" fill="none" stroke="#10b981" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value">{statistics.approvedToday}</div>
+            <div class="stat-label">{lang.approvedToday}</div>
+          </div>
+        </div>
+        
+        <div class="stat-card" style="border-color: rgba(239, 68, 68, 0.3);">
+          <div class="stat-icon" style="background: rgba(239, 68, 68, 0.1);">
+            <svg width="24" height="24" fill="none" stroke="#ef4444" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value">{statistics.rejectedToday}</div>
+            <div class="stat-label">{lang.rejectedToday}</div>
           </div>
         </div>
       </div>
 
-ENDFILE
-
-echo "Part 1 created, continuing..."
-
-      <!-- Filters -->
-      <div class="filter-section-logs">
-        <!-- Row 1: Search + Batch + Std ID -->
-        <div class="filter-row-logs">
-          <div class="search-box-logs">
-            <svg class="search-icon" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-            </svg>
-            <input type="text" placeholder={lang.searchPlaceholder} bind:value={searchQuery} />
-          </div>
-          <div class="nisit-filter-box">
-            <input type="text" placeholder={lang.batch} maxlength="2" bind:value={batchFilter} on:input={(e) => { batchFilter = e.currentTarget.value.replace(/\D/g, ""); }} />
-          </div>
-          <div class="nisit-filter-box">
-            <input type="text" placeholder={lang.stdId} maxlength="6" bind:value={stdIdFilter} on:input={(e) => { stdIdFilter = e.currentTarget.value.replace(/\D/g, ""); }} />
-          </div>
+      <div class="filter-section">
+        <div class="search-box">
+          <svg class="search-icon" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+          </svg>
+          <input type="text" placeholder={lang.searchPlaceholder} bind:value={searchQuery} class="search-input" />
+        </div>
+        
+        <div class="nisit-filters">
+          <input 
+            type="text" 
+            placeholder={lang.batch} 
+            maxlength="2" 
+            bind:value={batchFilter} 
+            on:input={(e) => { batchFilter = e.currentTarget.value.replace(/\D/g, ""); }}
+            class="nisit-input"
+          />
+          <input 
+            type="text" 
+            placeholder={lang.stdId} 
+            maxlength="6" 
+            bind:value={stdIdFilter} 
+            on:input={(e) => { stdIdFilter = e.currentTarget.value.replace(/\D/g, ""); }}
+            class="nisit-input"
+          />
         </div>
 
-        <!-- Row 2: Status + Date Range + Buttons -->
-        <div class="filter-row-logs">
-          <!-- Status Filter -->
-          <div class="filter-dropdown-logs" class:dropdown-open={showStatusDropdown}>
-            <button class="filter-trigger-logs" on:click|stopPropagation={() => { showFromDateDropdown = false; showToDateDropdown = false; showStatusDropdown = !showStatusDropdown; }}>
-              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>
-              </svg>
-              <span>{statusFilter || lang.all}</span>
-              <svg class="chevron" class:rotated={showStatusDropdown} width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"></path>
-              </svg>
-            </button>
-            {#if showStatusDropdown}
-              <div class="filter-menu-logs" on:click|stopPropagation>
-                <button class="filter-option-logs" class:selected={statusFilter === "All"} on:click={() => { statusFilter = "All"; showStatusDropdown = false; }}>{lang.all}</button>
-                <button class="filter-option-logs" class:selected={statusFilter === "Pending"} on:click={() => { statusFilter = "Pending"; showStatusDropdown = false; }}>{lang.pending}</button>
-              </div>
-            {/if}
-          </div>
+        <div class="filter-dropdown" class:dropdown-open={showStatusDropdown}>
+          <button class="filter-trigger" on:click|stopPropagation={() => {
+            const wasOpen = showStatusDropdown;
+            closeAllDropdowns();
+            showStatusDropdown = !wasOpen;
+          }}>
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>
+            </svg>
+            <span>{statusFilter === "All" ? lang.all : statusFilter}</span>
+            <svg class="chevron" class:rotated={showStatusDropdown} width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"></path>
+            </svg>
+          </button>
+          {#if showStatusDropdown}
+            <div class="filter-menu">
+              <button class="filter-option" class:selected={statusFilter === "All"} on:click|stopPropagation={() => { statusFilter = "All"; showStatusDropdown = false; }}>{lang.all}</button>
+              <button class="filter-option" class:selected={statusFilter === "Pending"} on:click|stopPropagation={() => { statusFilter = "Pending"; showStatusDropdown = false; }}>{lang.pending}</button>
+              <button class="filter-option" class:selected={statusFilter === "Approved"} on:click|stopPropagation={() => { statusFilter = "Approved"; showStatusDropdown = false; }}>{lang.approved}</button>
+              <button class="filter-option" class:selected={statusFilter === "Rejected"} on:click|stopPropagation={() => { statusFilter = "Rejected"; showStatusDropdown = false; }}>{lang.rejected}</button>
+            </div>
+          {/if}
+        </div>
 
-          <!-- From Date -->
-          <div class="date-input-group-logs" class:dropdown-open={showFromDateDropdown}>
+        <div class="date-filters">
+          <div class="date-input-group" class:dropdown-open={showFromDateDropdown}>
             <label>{lang.from}:</label>
-            <div class="custom-date-dropdown-logs">
-              <button class="custom-date-trigger-logs" on:click|stopPropagation={() => { showStatusDropdown = false; showToDateDropdown = false; showFromDateDropdown = !showFromDateDropdown; }}>
-                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+            <div class="custom-date-dropdown">
+              <button class="custom-date-trigger" on:click|stopPropagation={() => {
+                const wasOpen = showFromDateDropdown;
+                closeAllDropdowns();
+                showFromDateDropdown = !wasOpen;
+              }}>
+                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                </svg>
                 <span>{fromDate ? availableDates.find(d => d.value === fromDate)?.display || fromDate : lang.selectDate}</span>
-                <svg class="chevron" class:rotated={showFromDateDropdown} width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                <svg class="chevron" class:rotated={showFromDateDropdown} width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
               </button>
               {#if showFromDateDropdown}
-                <div class="custom-date-menu-logs" on:click|stopPropagation>
+                <div class="custom-date-menu" on:click|stopPropagation>
                   {#each availableDates as date}
-                    <button class="date-option-logs" class:selected={fromDate === date.value} on:click={() => { fromDate = date.value; showFromDateDropdown = false; }}>{date.display}</button>
+                    <button class="date-option" class:selected={fromDate === date.value} on:click={() => { fromDate = date.value; showFromDateDropdown = false; }}>
+                      {date.display}
+                    </button>
                   {/each}
                 </div>
               {/if}
             </div>
           </div>
 
-          <!-- To Date -->
-          <div class="date-input-group-logs" class:dropdown-open={showToDateDropdown}>
+          <div class="date-input-group" class:dropdown-open={showToDateDropdown}>
             <label>{lang.to}:</label>
-            <div class="custom-date-dropdown-logs">
-              <button class="custom-date-trigger-logs" on:click|stopPropagation={() => { showStatusDropdown = false; showFromDateDropdown = false; showToDateDropdown = !showToDateDropdown; }}>
-                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+            <div class="custom-date-dropdown">
+              <button class="custom-date-trigger" on:click|stopPropagation={() => {
+                const wasOpen = showToDateDropdown;
+                closeAllDropdowns();
+                showToDateDropdown = !wasOpen;
+              }}>
+                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                </svg>
                 <span>{toDate ? availableDates.find(d => d.value === toDate)?.display || toDate : lang.selectDate}</span>
-                <svg class="chevron" class:rotated={showToDateDropdown} width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                <svg class="chevron" class:rotated={showToDateDropdown} width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
               </button>
               {#if showToDateDropdown}
-                <div class="custom-date-menu-logs" on:click|stopPropagation>
+                <div class="custom-date-menu" on:click|stopPropagation>
                   {#each availableDates as date}
-                    <button class="date-option-logs" class:selected={toDate === date.value} on:click={() => { toDate = date.value; showToDateDropdown = false; }}>{date.display}</button>
+                    <button class="date-option" class:selected={toDate === date.value} on:click={() => { toDate = date.value; showToDateDropdown = false; }}>
+                      {date.display}
+                    </button>
                   {/each}
                 </div>
               {/if}
             </div>
           </div>
-
-          <!-- Apply & Reset Buttons -->
-          <button class="btn-apply-logs" on:click={() => { submissionsPage = 1; }}>
-            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path></svg>
-            {lang.apply}
-          </button>
-
-          <button class="btn-reset-logs" on:click={resetFilters}>
-            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-            {lang.reset}
-          </button>
         </div>
+
+        <button class="btn-reset-filter" on:click={resetFilters}>
+          <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+          </svg>
+          {lang.reset}
+        </button>
       </div>
 
-      <!-- Submissions Grid -->
-      <div class="verify-proof-submissions-section">
+      <div class="submissions-content">
         {#if loading}
           <div class="loading-state">
             <div class="spinner"></div>
@@ -717,11 +932,12 @@ echo "Part 1 created, continuing..."
             <p>{lang.noPendingSubmissions}</p>
           </div>
         {:else}
-          <div class="submissions-grid-new">
+          <div class="submissions-grid">
             {#each paginatedSubmissions as sub, index (sub.id)}
               {@const globalIndex = (submissionsPage - 1) * submissionsPerPage + index}
-              <div class="proof-card">
-                <div class="rank-circle">#{globalIndex + 1}</div>
+              <div class="submission-card">
+                <div class="rank-badge">#{globalIndex + 1}</div>
+                
                 <div class="user-details">
                   <h4 class="user-name">{sub.runnerName}</h4>
                   <p class="user-meta">
@@ -729,23 +945,46 @@ echo "Part 1 created, continuing..."
                     <span class="separator">•</span>
                     <span class="user-email">{sub.email}</span>
                   </p>
-                  <p class="status-text">Pending Verification</p>
+                  <div class="submission-info">
+                    <span class="status-badge" class:pending={sub.status === "Pending"} class:approved={sub.status === "Approved"} class:rejected={sub.status === "Rejected"}>
+                      {sub.status}
+                    </span>
+                    <span class="submitted-time">{formatTimestamp(sub.submittedAt)}</span>
+                  </div>
                 </div>
+                
                 <div class="proof-image-box" role="button" tabindex="0" on:click={() => onProofImageClick(sub.proofImage)} on:keydown={(e) => { if (e.key === "Enter" || e.key === " ") onProofImageClick(sub.proofImage); }}>
                   {#if sub.proofImage}
                     <img src={sub.proofImage} alt="Proof" />
                     <div class="image-overlay">
-                      <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M21 21l-4.35-4.35"></path><path d="M11 8v6M8 11h6"></path><circle cx="11" cy="11" r="8"></circle></svg>
-                      <span>Click to view</span>
+                      <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                        <path d="M21 21l-4.35-4.35"></path>
+                        <path d="M11 8v6M8 11h6"></path>
+                        <circle cx="11" cy="11" r="8"></circle>
+                      </svg>
+                      <span>{lang.viewImage}</span>
                     </div>
                   {:else}
                     <div class="no-image-placeholder">No image</div>
                   {/if}
                 </div>
-                <div class="proof-card-actions">
-                  <button class="btn-reject" on:click={() => onRejectSubmission(sub)}>{lang.reject}</button>
-                  <button class="btn-approve" on:click={() => onApproveSubmission(sub)}>{lang.approve}</button>
-                </div>
+                
+                {#if sub.status === "Pending"}
+                  <div class="card-actions">
+                    <button class="btn-reject" on:click={() => onRejectSubmission(sub)}>
+                      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
+                      </svg>
+                      {lang.reject}
+                    </button>
+                    <button class="btn-approve" on:click={() => onApproveSubmission(sub)}>
+                      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path>
+                      </svg>
+                      {lang.approve}
+                    </button>
+                  </div>
+                {/if}
               </div>
             {/each}
           </div>
@@ -754,34 +993,42 @@ echo "Part 1 created, continuing..."
             <div class="pagination-wrapper">
               <div class="pagination-controls">
                 <button class="page-btn" on:click={prevSubmissionsPage} disabled={submissionsPage === 1}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 19l-7-7 7-7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M15 19l-7-7 7-7" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
                 </button>
 
                 <div class="page-select-wrapper">
-                  <button class="page-indicator-box clickable" on:click|stopPropagation={() => (showSubmissionsPageDropdown = !showSubmissionsPageDropdown)}>
+                  <button class="page-indicator-box" on:click|stopPropagation={() => (showSubmissionsPageDropdown = !showSubmissionsPageDropdown)}>
                     <span class="current-page">{submissionsPage}</span>
                     <span class="sep">/</span>
                     <span class="total-page">{totalSubmissionsPages}</span>
-                    <svg class="dropdown-arrow" class:flipped={showSubmissionsPageDropdown} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <svg class="dropdown-arrow" class:flipped={showSubmissionsPageDropdown} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
                   </button>
 
                   {#if showSubmissionsPageDropdown}
                     <div class="page-dropdown-list" on:click|stopPropagation>
                       {#each Array(totalSubmissionsPages) as _, i}
-                        <button class="page-dropdown-item" class:active={submissionsPage === i + 1} on:click={() => { submissionsPage = i + 1; showSubmissionsPageDropdown = false; }}>Page {i + 1}</button>
+                        <button class="page-option" class:active={submissionsPage === i + 1} on:click={() => { submissionsPage = i + 1; showSubmissionsPageDropdown = false; }}>
+                          Page {i + 1}
+                        </button>
                       {/each}
                     </div>
                   {/if}
                 </div>
 
                 <button class="page-btn" on:click={nextSubmissionsPage} disabled={submissionsPage === totalSubmissionsPages}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
                 </button>
               </div>
-            </div>
-            
-            <div class="page-info">
-              Showing {(submissionsPage - 1) * submissionsPerPage + 1} - {Math.min(submissionsPage * submissionsPerPage, totalSubmissions)} of {totalSubmissions} submissions
+              
+              <div class="showing-text">
+                {lang.showingResults} {(submissionsPage - 1) * submissionsPerPage + 1} - {Math.min(submissionsPage * submissionsPerPage, totalSubmissions)} {lang.of} {totalSubmissions} {lang.results}
+              </div>
             </div>
           {/if}
         {/if}
@@ -790,7 +1037,6 @@ echo "Part 1 created, continuing..."
   {/if}
 </div>
 
-<!-- Image Modal -->
 {#if showImageModal}
   <div class="image-modal" on:click={closeImageModal}>
     <div class="modal-content" on:click|stopPropagation>
@@ -800,68 +1046,81 @@ echo "Part 1 created, continuing..."
   </div>
 {/if}
 
-
 <style>
-  /* CONTAINER */
-  .logs-container {
-    padding: 2rem 1.5rem;
+  /* ==================== CONTAINER ==================== */
+  .proof-verification-container {
+    width: 100%;
     min-height: 100vh;
+    background: #0f172a;
   }
 
-  /* GRID SECTION (Event Selection) */
-  .grid-section {
+  /* ==================== EVENTS VIEW ==================== */
+  .events-view {
     max-width: 1400px;
     margin: 0 auto;
+    padding: 2rem;
   }
 
-  .grid {
+  .page-header {
+    margin-bottom: 3rem;
+    text-align: center;
+  }
+
+  .page-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: #f8fafc;
+    margin-bottom: 0.5rem;
+  }
+
+  .page-header p {
+    font-size: 1.125rem;
+    color: #94a3b8;
+  }
+
+  .events-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 1.5rem;
-    margin-bottom: 2rem;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 2rem;
   }
 
-  .glass-card {
+  .event-card {
     background: rgba(30, 41, 59, 0.6);
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 20px;
     overflow: hidden;
     transition: all 0.3s;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
   }
 
-  .glass-card:hover {
+  .event-card:hover {
     transform: translateY(-4px);
-    border-color: rgba(16, 185, 129, 0.3);
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    border-color: rgba(16, 185, 129, 0.4);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
   }
 
-  .card-img-wrapper {
+  .event-image-wrapper {
     position: relative;
     width: 100%;
     height: 200px;
     overflow: hidden;
-    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
   }
 
-  .card-img {
+  .event-image {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 0.5s;
+    transition: transform 0.3s;
   }
 
-  .glass-card:hover .card-img {
+  .event-card:hover .event-image {
     transform: scale(1.05);
   }
 
   .pending-badge-overlay {
     position: absolute;
     top: 1rem;
-    right: 1rem;
+    left: 1rem;
     padding: 0.5rem 1rem;
     background: linear-gradient(135deg, #f59e0b, #d97706);
     border-radius: 20px;
@@ -869,275 +1128,149 @@ echo "Part 1 created, continuing..."
     font-size: 0.875rem;
     font-weight: 700;
     box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+    z-index: 2;
   }
 
-  .card-body {
-    padding: 1.25rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    flex: 1;
-  }
-
-  .card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 0.75rem;
-  }
-
-  .card-header h3 {
-    flex: 1;
-    margin: 0;
-    font-size: 1.125rem;
-    font-weight: 600;
-    color: #f8fafc;
-    line-height: 1.4;
-  }
-
-  .status-group {
-    display: flex;
-    gap: 0.5rem;
-  }
-
-  .status-badge {
-    padding: 0.375rem 0.75rem;
+  .event-status-badge {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    padding: 0.5rem 1rem;
     border-radius: 12px;
     font-size: 0.75rem;
-    font-weight: 600;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    backdrop-filter: blur(10px);
   }
 
-  .status-badge.status-active {
-    background: rgba(16, 185, 129, 0.15);
-    color: #10b981;
-    border: 1px solid rgba(16, 185, 129, 0.3);
+  .event-status-badge.active {
+    background: rgba(16, 185, 129, 0.9);
+    color: white;
   }
 
-  .status-badge.status-closed {
-    background: rgba(239, 68, 68, 0.15);
-    color: #ef4444;
-    border: 1px solid rgba(239, 68, 68, 0.3);
+  .event-status-badge.closed {
+    background: rgba(100, 116, 139, 0.9);
+    color: white;
   }
 
-  .status-badge.status-draft {
-    background: rgba(148, 163, 184, 0.15);
-    color: #94a3b8;
-    border: 1px solid rgba(148, 163, 184, 0.3);
+  .event-status-badge.draft {
+    background: rgba(148, 163, 184, 0.9);
+    color: white;
   }
 
-  .event-description-short {
-    color: #94a3b8;
-    font-size: 0.875rem;
-    line-height: 1.5;
-    margin: 0;
+  .event-card-body {
+    padding: 1.5rem;
   }
 
-  .event-simple-meta {
+  .event-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #f8fafc;
+    margin-bottom: 0.75rem;
+  }
+
+  .event-description {
+    color: #cbd5e1;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    margin-bottom: 1rem;
+  }
+
+  .event-meta {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    margin-bottom: 1.5rem;
   }
 
-  .meta-row {
+  .meta-item {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    color: #64748b;
+    color: #94a3b8;
     font-size: 0.875rem;
   }
 
-  .meta-row svg {
+  .meta-item svg {
     flex-shrink: 0;
     color: #10b981;
   }
 
-  .action-buttons {
-    display: flex;
-    gap: 0.75rem;
-    margin-top: auto;
-  }
-
-  .action-btn {
-    flex: 1;
-    padding: 0.75rem 1rem;
-    background: transparent;
-    border: 1px solid rgba(16, 185, 129, 0.4);
-    border-radius: 12px;
-    color: #10b981;
-    font-weight: 600;
-    font-size: 0.9rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    cursor: pointer;
-    transition: all 0.3s;
-  }
-
-  .action-btn:hover {
-    background: rgba(16, 185, 129, 0.1);
-    border-color: #10b981;
-    transform: translateY(-2px);
-  }
-
-  /* PAGINATION */
-  .pagination-wrapper {
-    display: flex;
-    justify-content: center;
-    margin: 2rem 0 1rem;
-  }
-
-  .pagination-controls {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-  }
-
-  .page-btn {
-    width: 40px;
-    height: 40px;
-    background: rgba(30, 41, 59, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.3s;
-    color: #94a3b8;
-  }
-
-  .page-btn:hover:not(:disabled) {
-    background: rgba(16, 185, 129, 0.1);
-    border-color: rgba(16, 185, 129, 0.3);
-    color: #10b981;
-  }
-
-  .page-btn:disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
-  }
-
-  .page-select-wrapper {
-    position: relative;
-  }
-
-  .page-indicator-box {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.625rem 1rem;
-    background: rgba(30, 41, 59, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    color: #f8fafc;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s;
-  }
-
-  .page-indicator-box:hover {
-    border-color: rgba(16, 185, 129, 0.3);
-  }
-
-  .dropdown-arrow {
-    transition: transform 0.3s;
-  }
-
-  .dropdown-arrow.flipped {
-    transform: rotate(180deg);
-  }
-
-  .page-dropdown-list {
-    position: absolute;
-    top: calc(100% + 0.5rem);
-    left: 0;
-    right: 0;
-    max-height: 200px;
-    overflow-y: auto;
-    background: #1e293b;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-    z-index: 100;
-    padding: 0.5rem;
-  }
-
-  .page-dropdown-item {
+  .btn-view-submissions {
     width: 100%;
-    padding: 0.75rem 1rem;
-    background: transparent;
+    padding: 0.875rem 1.25rem;
+    background: linear-gradient(135deg, #10b981, #059669);
     border: none;
-    text-align: left;
-    color: #94a3b8;
-    font-weight: 500;
+    border-radius: 12px;
+    color: white;
+    font-weight: 600;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
     cursor: pointer;
-    border-radius: 8px;
-    transition: all 0.2s;
+    transition: all 0.3s;
   }
 
-  .page-dropdown-item:hover {
-    background: rgba(16, 185, 129, 0.1);
-    color: #10b981;
+  .btn-view-submissions:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(16, 185, 129, 0.4);
   }
 
-  .page-dropdown-item.active {
-    background: rgba(16, 185, 129, 0.15);
-    color: #10b981;
-  }
-
-  .page-info {
-    text-align: center;
-    color: #64748b;
-    font-size: 0.875rem;
-  }
-
-  /* DETAIL VIEW */
-  .logs-detail {
+  /* ==================== SUBMISSIONS VIEW ==================== */
+  .submissions-view {
     max-width: 1600px;
     margin: 0 auto;
+    padding: 2rem;
   }
 
-  .logs-header {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1.5rem;
-    margin-bottom: 2rem;
-    padding: 1.5rem;
+  .submissions-header {
     background: rgba(30, 41, 59, 0.6);
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 20px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
   }
 
-  .btn-back-logs {
+  .btn-back {
+    background: rgba(100, 116, 139, 0.2);
+    border: 1px solid rgba(100, 116, 139, 0.3);
+    color: #94a3b8;
+    padding: 0.75rem 1.25rem;
+    border-radius: 12px;
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.75rem 1.25rem;
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    color: #94a3b8;
-    font-weight: 600;
     cursor: pointer;
-    transition: all 0.3s;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: all 0.2s;
+    flex-shrink: 0;
   }
 
-  .btn-back-logs:hover {
-    border-color: rgba(16, 185, 129, 0.3);
-    color: #10b981;
-    background: rgba(16, 185, 129, 0.05);
-  }
-
-  .selected-event-info h3 {
-    margin: 0 0 0.5rem 0;
-    font-size: 1.5rem;
+  .btn-back:hover {
+    background: rgba(100, 116, 139, 0.3);
+    border-color: #64748b;
     color: #f8fafc;
+    transform: translateX(-2px);
+  }
+
+  .header-info {
+    flex: 1;
+    min-width: 250px;
+  }
+
+  .header-info h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #f8fafc;
+    margin: 0 0 0.5rem 0;
   }
 
   .event-meta-small {
@@ -1145,19 +1278,23 @@ echo "Part 1 created, continuing..."
     flex-wrap: wrap;
     gap: 1rem;
     align-items: center;
+    font-size: 0.875rem;
+    color: #94a3b8;
   }
 
   .event-meta-small span {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    color: #94a3b8;
-    font-size: 0.875rem;
+  }
+
+  .event-meta-small svg {
+    color: #10b981;
   }
 
   .status-badge-inline {
     padding: 0.25rem 0.75rem;
-    background: rgba(148, 163, 184, 0.15);
+    background: rgba(148, 163, 184, 0.2);
     border: 1px solid rgba(148, 163, 184, 0.3);
     border-radius: 12px;
     color: #94a3b8;
@@ -1167,12 +1304,12 @@ echo "Part 1 created, continuing..."
   }
 
   .status-badge-inline.active {
-    background: rgba(16, 185, 129, 0.15);
+    background: rgba(16, 185, 129, 0.2);
     border-color: rgba(16, 185, 129, 0.3);
     color: #10b981;
   }
 
-  .logs-action-buttons {
+  .header-actions {
     display: flex;
     gap: 0.75rem;
   }
@@ -1212,7 +1349,7 @@ echo "Part 1 created, continuing..."
   }
 
   .btn-auto-refresh.active {
-    background: rgba(16, 185, 129, 0.15);
+    background: rgba(16, 185, 129, 0.2);
     border-color: rgba(16, 185, 129, 0.3);
     color: #10b981;
   }
@@ -1228,77 +1365,79 @@ echo "Part 1 created, continuing..."
     animation: pulse 1.5s infinite;
   }
 
-  /* STATS */
-  .stats-dashboard-single-row {
+  /* ==================== STATISTICS ==================== */
+  .stats-dashboard {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1rem;
+    gap: 1.5rem;
     margin-bottom: 2rem;
   }
 
-  .stat-card-compact {
+  .stat-card {
+    background: rgba(30, 41, 59, 0.6);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 1.5rem;
     display: flex;
     align-items: center;
     gap: 1rem;
-    padding: 1.25rem 1.5rem;
-    background: rgba(30, 41, 59, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 16px;
+    transition: all 0.3s;
   }
 
-  .stat-card-compact.pending {
-    border-color: rgba(245, 158, 11, 0.3);
+  .stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
   }
 
-  .stat-icon-compact {
+  .stat-icon {
     width: 48px;
     height: 48px;
-    background: rgba(245, 158, 11, 0.15);
     border-radius: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #f59e0b;
+    flex-shrink: 0;
   }
 
-  .stat-info-compact {
+  .stat-info {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
   }
 
-  .stat-value-compact {
+  .stat-value {
     font-size: 2rem;
     font-weight: 700;
     color: #f8fafc;
     line-height: 1;
   }
 
-  .stat-label-compact {
-    color: #94a3b8;
+  .stat-label {
     font-size: 0.875rem;
     font-weight: 500;
-    text-transform: uppercase;
+    color: #94a3b8;
+    line-height: 1;
   }
 
-  /* FILTERS */
-  .filter-section-logs {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
+  /* ==================== FILTERS ==================== */
+  .filter-section {
+    background: rgba(30, 41, 59, 0.6);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    padding: 1.5rem;
     margin-bottom: 2rem;
-  }
-
-  .filter-row-logs {
     display: flex;
-    gap: 0.75rem;
+    gap: 1rem;
     flex-wrap: wrap;
+    align-items: center;
   }
 
-  .search-box-logs {
-    position: relative;
+  .search-box {
     flex: 1;
     min-width: 250px;
+    position: relative;
   }
 
   .search-icon {
@@ -1307,146 +1446,167 @@ echo "Part 1 created, continuing..."
     top: 50%;
     transform: translateY(-50%);
     color: #64748b;
+    pointer-events: none;
   }
 
-  .search-box-logs input {
+  .search-input {
     width: 100%;
-    padding: 0.875rem 1rem 0.875rem 3rem;
-    background: rgba(30, 41, 59, 0.6);
+    padding: 0.875rem 1rem 0.875rem 2.75rem;
+    background: rgba(15, 23, 42, 0.6);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     color: #f8fafc;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
   }
 
-  .search-box-logs input::placeholder {
+  .search-input::placeholder {
     color: #64748b;
   }
 
-  .search-box-logs input:focus {
+  .search-input:focus {
     outline: none;
-    border-color: rgba(16, 185, 129, 0.3);
+    border-color: #10b981;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
   }
 
-  .nisit-filter-box input {
+  .nisit-filters {
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .nisit-input {
     padding: 0.875rem 1rem;
-    background: rgba(30, 41, 59, 0.6);
+    background: rgba(15, 23, 42, 0.6);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     color: #f8fafc;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
     width: 100px;
     text-align: center;
   }
 
-  .nisit-filter-box input:focus {
-    outline: none;
-    border-color: rgba(16, 185, 129, 0.3);
+  .nisit-input::placeholder {
+    color: #64748b;
   }
 
-  .filter-dropdown-logs {
+  .nisit-input:focus {
+    outline: none;
+    border-color: #10b981;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+  }
+
+  .filter-dropdown {
     position: relative;
   }
 
-  .filter-trigger-logs {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.875rem 1.25rem;
-    background: rgba(30, 41, 59, 0.6);
+  .filter-trigger {
+    padding: 0.875rem 1rem;
+    background: rgba(15, 23, 42, 0.6);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     color: #f8fafc;
-    font-weight: 500;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
     cursor: pointer;
-    transition: all 0.3s;
+    min-width: 180px;
+    transition: all 0.2s;
   }
 
-  .filter-trigger-logs:hover {
-    border-color: rgba(16, 185, 129, 0.3);
+  .filter-trigger:hover {
+    border-color: rgba(16, 185, 129, 0.4);
   }
 
   .chevron {
-    transition: transform 0.3s;
+    margin-left: auto;
+    transition: transform 0.2s;
   }
 
   .chevron.rotated {
     transform: rotate(180deg);
   }
 
-  .filter-menu-logs {
+  .filter-menu {
     position: absolute;
     top: calc(100% + 0.5rem);
     left: 0;
-    min-width: 150px;
     background: #1e293b;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-    z-index: 100;
     padding: 0.5rem;
+    min-width: 180px;
+    max-height: 300px;
+    overflow-y: auto;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    animation: slideDown 0.2s ease;
   }
 
-  .filter-option-logs {
+  .filter-option {
     width: 100%;
     padding: 0.75rem 1rem;
     background: transparent;
     border: none;
+    color: #f8fafc;
     text-align: left;
-    color: #94a3b8;
-    font-weight: 500;
     cursor: pointer;
     border-radius: 8px;
+    font-size: 0.9rem;
     transition: all 0.2s;
   }
 
-  .filter-option-logs:hover {
+  .filter-option:hover {
     background: rgba(16, 185, 129, 0.1);
+  }
+
+  .filter-option.selected {
+    background: rgba(16, 185, 129, 0.2);
     color: #10b981;
   }
 
-  .filter-option-logs.selected {
-    background: rgba(16, 185, 129, 0.15);
-    color: #10b981;
+  .date-filters {
+    display: flex;
+    gap: 1rem;
   }
 
-  .date-input-group-logs {
+  .date-input-group {
     position: relative;
     display: flex;
     align-items: center;
     gap: 0.5rem;
   }
 
-  .date-input-group-logs label {
+  .date-input-group label {
     color: #94a3b8;
     font-size: 0.9rem;
     font-weight: 500;
     white-space: nowrap;
   }
 
-  .custom-date-dropdown-logs {
+  .custom-date-dropdown {
     position: relative;
   }
 
-  .custom-date-trigger-logs {
+  .custom-date-trigger {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     padding: 0.875rem 1rem;
-    background: rgba(30, 41, 59, 0.6);
+    background: rgba(15, 23, 42, 0.6);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     color: #f8fafc;
     cursor: pointer;
-    transition: all 0.3s;
+    transition: all 0.2s;
     white-space: nowrap;
   }
 
-  .custom-date-trigger-logs:hover {
-    border-color: rgba(16, 185, 129, 0.3);
+  .custom-date-trigger:hover {
+    border-color: rgba(16, 185, 129, 0.4);
   }
 
-  .custom-date-menu-logs {
+  .custom-date-menu {
     position: absolute;
     top: calc(100% + 0.5rem);
     left: 0;
@@ -1454,82 +1614,69 @@ echo "Part 1 created, continuing..."
     max-height: 250px;
     overflow-y: auto;
     background: #1e293b;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-    z-index: 100;
+    z-index: 1000;
     padding: 0.5rem;
+    animation: slideDown 0.2s ease;
   }
 
-  .date-option-logs {
+  .date-option {
     width: 100%;
     padding: 0.75rem 1rem;
     background: transparent;
     border: none;
     text-align: left;
-    color: #94a3b8;
-    font-weight: 500;
+    color: #f8fafc;
     cursor: pointer;
     border-radius: 8px;
+    font-size: 0.9rem;
     transition: all 0.2s;
   }
 
-  .date-option-logs:hover {
+  .date-option:hover {
     background: rgba(16, 185, 129, 0.1);
+  }
+
+  .date-option.selected {
+    background: rgba(16, 185, 129, 0.2);
     color: #10b981;
   }
 
-  .date-option-logs.selected {
-    background: rgba(16, 185, 129, 0.15);
-    color: #10b981;
-  }
-
-  .btn-apply-logs, .btn-reset-logs {
+  .btn-reset-filter {
+    padding: 0.875rem 1.25rem;
+    background: rgba(100, 116, 139, 0.2);
+    border: 1px solid rgba(100, 116, 139, 0.3);
+    border-radius: 12px;
+    color: #94a3b8;
+    font-weight: 600;
+    font-size: 0.9rem;
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.875rem 1.25rem;
-    border: none;
-    border-radius: 12px;
-    font-weight: 600;
     cursor: pointer;
-    transition: all 0.3s;
-    white-space: nowrap;
+    transition: all 0.2s;
   }
 
-  .btn-apply-logs {
-    background: linear-gradient(135deg, #10b981, #059669);
-    color: white;
+  .btn-reset-filter:hover {
+    background: rgba(100, 116, 139, 0.3);
+    border-color: #64748b;
   }
 
-  .btn-apply-logs:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
-  }
-
-  .btn-reset-logs {
-    background: rgba(100, 116, 139, 0.15);
-    border: 1px solid rgba(100, 116, 139, 0.3);
-    color: #94a3b8;
-  }
-
-  .btn-reset-logs:hover {
-    background: rgba(100, 116, 139, 0.25);
-  }
-
-  /* SUBMISSIONS GRID */
-  .verify-proof-submissions-section {
+  /* ==================== SUBMISSIONS GRID ==================== */
+  .submissions-content {
     min-height: 400px;
   }
 
-  .submissions-grid-new {
+  .submissions-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
     gap: 1.5rem;
     margin-bottom: 2rem;
   }
 
-  .proof-card {
+  .submission-card {
     position: relative;
     background: rgba(30, 41, 59, 0.6);
     backdrop-filter: blur(10px);
@@ -1542,12 +1689,12 @@ echo "Part 1 created, continuing..."
     transition: all 0.3s;
   }
 
-  .proof-card:hover {
-    border-color: rgba(16, 185, 129, 0.2);
+  .submission-card:hover {
+    border-color: rgba(16, 185, 129, 0.3);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
   }
 
-  .rank-circle {
+  .rank-badge {
     position: absolute;
     top: 1rem;
     left: 1rem;
@@ -1581,7 +1728,7 @@ echo "Part 1 created, continuing..."
     gap: 0.5rem;
     color: #94a3b8;
     font-size: 0.875rem;
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 0.75rem 0;
   }
 
   .nisit-id {
@@ -1594,11 +1741,42 @@ echo "Part 1 created, continuing..."
     color: #475569;
   }
 
-  .status-text {
-    color: #f59e0b;
-    font-size: 0.875rem;
+  .submission-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .status-badge {
+    display: inline-flex;
+    padding: 0.375rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
     font-weight: 600;
-    margin: 0;
+  }
+
+  .status-badge.pending {
+    background: rgba(245, 158, 11, 0.2);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: #f59e0b;
+  }
+
+  .status-badge.approved {
+    background: rgba(16, 185, 129, 0.2);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: #10b981;
+  }
+
+  .status-badge.rejected {
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+  }
+
+  .submitted-time {
+    color: #64748b;
+    font-size: 0.85rem;
   }
 
   .proof-image-box {
@@ -1650,7 +1828,7 @@ echo "Part 1 created, continuing..."
     font-size: 0.875rem;
   }
 
-  .proof-card-actions {
+  .card-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 0.75rem;
@@ -1664,16 +1842,20 @@ echo "Part 1 created, continuing..."
     font-size: 0.95rem;
     cursor: pointer;
     transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
   }
 
   .btn-reject {
-    background: rgba(239, 68, 68, 0.15);
+    background: rgba(239, 68, 68, 0.2);
     border: 1px solid rgba(239, 68, 68, 0.3);
     color: #ef4444;
   }
 
   .btn-reject:hover {
-    background: rgba(239, 68, 68, 0.25);
+    background: rgba(239, 68, 68, 0.3);
     transform: translateY(-2px);
   }
 
@@ -1688,7 +1870,119 @@ echo "Part 1 created, continuing..."
     box-shadow: 0 8px 20px rgba(16, 185, 129, 0.4);
   }
 
-  /* IMAGE MODAL */
+  /* ==================== PAGINATION ==================== */
+  .pagination-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .page-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #f8fafc;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .page-btn:hover:not(:disabled) {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: #10b981;
+  }
+
+  .page-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .page-select-wrapper {
+    position: relative;
+  }
+
+  .page-indicator-box {
+    padding: 0.625rem 1rem;
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-weight: 600;
+    color: #f8fafc;
+  }
+
+  .page-indicator-box .sep {
+    color: #64748b;
+  }
+
+  .dropdown-arrow {
+    transition: transform 0.2s;
+  }
+
+  .dropdown-arrow.flipped {
+    transform: rotate(180deg);
+  }
+
+  .page-dropdown-list {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1e293b;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 0.5rem;
+    max-height: 300px;
+    overflow-y: auto;
+    min-width: 120px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    animation: slideDown 0.2s ease;
+  }
+
+  .page-option {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: transparent;
+    border: none;
+    color: #f8fafc;
+    text-align: center;
+    cursor: pointer;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+  }
+
+  .page-option:hover {
+    background: rgba(16, 185, 129, 0.1);
+  }
+
+  .page-option.active {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+    font-weight: 700;
+  }
+
+  .showing-text {
+    font-size: 0.9rem;
+    color: #94a3b8;
+  }
+
+  /* ==================== IMAGE MODAL ==================== */
   .image-modal {
     position: fixed;
     inset: 0;
@@ -1727,32 +2021,60 @@ echo "Part 1 created, continuing..."
     display: flex;
     align-items: center;
     justify-content: center;
+    transition: all 0.2s;
   }
 
-  /* STATES */
-  .loading-state, .empty-state {
+  .modal-close:hover {
+    background: #ef4444;
+    transform: scale(1.1);
+  }
+
+  /* ==================== LOADING & EMPTY STATES ==================== */
+  .loading-state,
+  .empty-state {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 1rem;
     padding: 4rem 2rem;
-    color: #94a3b8;
+    color: #64748b;
+  }
+
+  .loading-state svg,
+  .empty-state svg {
+    margin-bottom: 1rem;
+  }
+
+  .loading-state p,
+  .empty-state p {
+    font-size: 1rem;
+    margin: 0;
   }
 
   .spinner {
     width: 48px;
     height: 48px;
-    border: 4px solid rgba(16, 185, 129, 0.2);
+    border: 4px solid rgba(16, 185, 129, 0.1);
     border-top-color: #10b981;
     border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    animation: spin 1s linear infinite;
   }
 
-  /* ANIMATIONS */
+  /* ==================== ANIMATIONS ==================== */
   @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
+  }
+
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   @keyframes pulse {
@@ -1764,31 +2086,72 @@ echo "Part 1 created, continuing..."
     to { transform: rotate(360deg); }
   }
 
-  /* RESPONSIVE */
+  /* ==================== RESPONSIVE ==================== */
+  @media (max-width: 1024px) {
+    .stats-dashboard {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
   @media (max-width: 768px) {
-    .logs-container {
+    .events-view,
+    .submissions-view {
       padding: 1rem;
     }
 
-    .logs-header {
+    .page-header h1 {
+      font-size: 2rem;
+    }
+
+    .events-grid,
+    .submissions-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .submissions-header {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .header-actions {
+      width: 100%;
+    }
+
+    .filter-section {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .search-box,
+    .nisit-filters,
+    .filter-dropdown,
+    .date-filters,
+    .btn-reset-filter {
+      width: 100%;
+    }
+
+    .nisit-input {
+      flex: 1;
+    }
+
+    .date-filters {
+      flex-direction: column;
+    }
+
+    .stats-dashboard {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .header-info h1 {
+      font-size: 1.5rem;
+    }
+
+    .event-meta-small {
       flex-direction: column;
       align-items: flex-start;
-    }
-
-    .filter-row-logs {
-      flex-direction: column;
-    }
-
-    .search-box-logs {
-      min-width: 100%;
-    }
-
-    .submissions-grid-new {
-      grid-template-columns: 1fr;
-    }
-
-    .grid {
-      grid-template-columns: 1fr;
+      gap: 0.5rem;
     }
   }
 </style>

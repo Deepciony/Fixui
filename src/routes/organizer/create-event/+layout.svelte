@@ -158,7 +158,8 @@
     eDay: "", eMonth: "", eYear: "", 
     startTime: "", endTime: "",
     totalSlots: null as number | null, distanceKm: null as number | null,
-    holidayType: "none" as "none" | "weekends" | "specific",
+    // [แก้ไข] รองรับ public และ weekends_public
+    holidayType: "none" as "none" | "weekends" | "specific" | "public" | "weekends_public",
     specificDates: [] as string[],
     selectedHoliday: "", 
     totalRewards: null as number | null, 
@@ -599,15 +600,16 @@
         throw new Error("Event ID not returned from API");
       }
 
-      // 3. Handle Holidays (✅ FIXED: Use proper API endpoints)
+      // 3. Handle Holidays (✅ FIXED: Support Public Holidays & Public+Weekends)
       if (formData.eventType === 'multi_day' && targetId) {
         let holidayDates: string[] = [];
         let holidayNames: string[] = [];
 
         if (formData.holidayType === 'weekends') {
           holidayDates = getWeekendDates(startDateStr, endDateStr);
-          holidayNames = holidayDates.map(() => "Weekend Holiday");
-        } else if (formData.holidayType === 'specific') {
+          holidayNames = holidayDates.map(() => "วันหยุดเสาร์-อาทิตย์");
+        } 
+        else if (formData.holidayType === 'specific') {
           holidayDates = formData.specificDates;
           holidayNames = formData.specificDates.map((date) => {
             const d = new Date(date);
@@ -617,6 +619,29 @@
               year: 'numeric' 
             });
           });
+        } 
+        else if (formData.holidayType === 'public' || formData.holidayType === 'weekends_public') {
+            // 1. Get Public Holidays
+            const publicHols = holidaysData.filter((h: any) => 
+                h.date >= startDateStr && h.date <= endDateStr
+            );
+            
+            let dates = publicHols.map((h: any) => h.date);
+            let names = publicHols.map((h: any) => h.name_th || h.name);
+
+            // 2. If Weekends included
+            if (formData.holidayType === 'weekends_public') {
+                const weekends = getWeekendDates(startDateStr, endDateStr);
+                weekends.forEach(wd => {
+                    if (!dates.includes(wd)) {
+                        dates.push(wd);
+                        names.push("วันหยุดเสาร์-อาทิตย์");
+                    }
+                });
+            }
+            
+            holidayDates = dates;
+            holidayNames = names;
         }
 
         // ✅ Clear old holidays first if editing
@@ -663,11 +688,6 @@
       }
 
       // 4. Handle Rewards (✅ NEW: Competition-based reward system)
-      // Logic: ทุกคนแข่งกันเพื่อรางวัล โดยระบบจะ:
-      // 1. ดูว่าแต่ละคนผ่านเกณฑ์รางวัลไหนบ้าง (เลือกรางวัลที่ใหญ่ที่สุด)
-      // 2. เรียงตามความยากของรางวัล (required_completions) จากมากไปน้อย
-      // 3. ตัดตามจำนวนรางวัลทั้งหมด (max_reward_recipients)
-      // 4. คนที่เหลือ = อด/waitlist (แม้จะผ่านเกณฑ์รางวัลเล็กก็ไม่ได้)
       if (formData.totalRewards && formData.rewardTiers.length > 0 && formData.rewardTiers[0].reward_name && targetId) {
          
          // สร้าง reward items โดยเรียงจากยากไปง่าย
@@ -706,7 +726,6 @@
              const total = Number(formData.totalRewards) || 300;
              
              // ✅ Build reward_tiers with competition logic
-             // ไม่มี min_rank/max_rank แบบแบ่งชัด แต่ให้ระบบคำนวณเอง
              const rewardConfigPayload = {
                  event_id: Number(targetId),
                  name: `Leaderboard for ${formData.title}`,
@@ -842,19 +861,12 @@
                                      if (result.isConfirmed) {
                                          // User wants to force reset
                                          try {
-                                             // Try to find config ID from backend logs/database
-                                             // Since GET fails, we'll try to DELETE by event_id endpoint
-                                             console.log("Attempting to force delete corrupt config...");
-                                             
                                              // Option 1: Try DELETE with event_id if backend supports it
                                              try {
                                                  await api.delete(`/api/reward-leaderboards/configs/event/${rewardConfigPayload.event_id}`);
                                                  console.log("✅ Deleted corrupt config via event_id");
                                              } catch (delErr) {
                                                  console.warn("DELETE by event_id not supported, trying direct ID...");
-                                                 
-                                                 // Option 2: Ask backend team to provide DELETE endpoint
-                                                 // For now, show instructions
                                                  throw new Error("Cannot auto-delete. Please contact support.");
                                              }
                                              
@@ -994,7 +1006,6 @@
     </div>
 
     <div class="ce-grid-layout">
-      <!-- Image Upload Card -->
       <div class="ce-card ce-img-card" class:has-img={formData.imagePreview} on:click|stopPropagation={triggerFileInput}>
         <input type="file" accept="image/*" bind:this={fileInput} on:change={handleImageUpload} hidden />
         {#if formData.imagePreview}
@@ -1005,7 +1016,6 @@
         {/if}
       </div>
 
-      <!-- Basic Info Card -->
       <div class="ce-card ce-form-card">
         <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg><span>{lang.basicInformation}</span></div>
         <div class="ce-input-group"><label for="title">{lang.eventName} <span class="ce-req">*</span></label><input id="title" type="text" bind:value={formData.title} placeholder="ชื่อกิจกรรม" class="ce-input" class:error={validationErrors.has("title")} /></div>
@@ -1013,7 +1023,6 @@
         <div class="ce-input-group"><label for="location">{lang.location} <span class="ce-req">*</span></label><input id="location" type="text" bind:value={formData.location} placeholder="สถานที่" class="ce-input" class:error={validationErrors.has("location")} /></div>
       </div>
 
-      <!-- Event Type Card -->
       <div class="ce-card ce-config-card">
          <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9"></path></svg><span>{lang.eventTypeTitle}</span></div>
          <div class="ce-event-type-buttons">
@@ -1029,7 +1038,6 @@
         {/if}
       </div>
 
-      <!-- Date & Time Card -->
       <div class="ce-card ce-config-card">
         <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg><span>{lang.dateAndTime}</span></div>
         <div class="ce-input-group"><label>{lang.startDateLabel} <span class="ce-req">*</span></label><div class="ce-date-row" class:error={validationErrors.has("startDate")}><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("sDay")}><input type="text" value={formData.sDay} placeholder={lang.dayPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "sDay"}<div class="ce-options" on:click|stopPropagation>{#each days as d}<button class="ce-opt" on:click|stopPropagation={() => selectOption("sDay", d)}>{d}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-2"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("sMonth")}><input type="text" value={translateMonth(formData.sMonth)} placeholder={lang.monthPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "sMonth"}<div class="ce-options" on:click|stopPropagation>{#each months as m, idx}<button class="ce-opt" on:click|stopPropagation={() => selectOption("sMonth", m)}>{displayMonths[idx]}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("sYear")}><input type="text" value={formData.sYear} placeholder={lang.yearPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "sYear"}<div class="ce-options" on:click|stopPropagation>{#each years as y}<button class="ce-opt" on:click|stopPropagation={() => selectOption("sYear", y)}>{y}</button>{/each}</div>{/if}</div></div></div>
@@ -1046,13 +1054,11 @@
         <div class="ce-dual-row"><div class="ce-input-group"><label>{lang.startTimeLabel} <span class="ce-req">*</span></label><div class="ce-dd-wrap"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("startTime")}><input type="text" value={formData.startTime} placeholder={lang.selectTime} class="ce-input-dis" class:error={validationErrors.has("startTime")} readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "startTime"}<div class="ce-options time-scroll" on:click|stopPropagation>{#each times as t}<button class="ce-opt" on:click|stopPropagation={() => selectOption("startTime", t)}>{t}</button>{/each}</div>{/if}</div></div><div class="ce-input-group"><label>{lang.endTimeLabel} <span class="ce-req">*</span></label><div class="ce-dd-wrap"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("endTime")}><input type="text" value={formData.endTime} placeholder={lang.selectTime} class="ce-input-dis" class:error={validationErrors.has("endTime")} readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "endTime"}<div class="ce-options time-scroll" on:click|stopPropagation>{#each times as t}<button class="ce-opt" on:click|stopPropagation={() => selectOption("endTime", t)}>{t}</button>{/each}</div>{/if}</div></div></div>
       </div>
 
-      <!-- Capacity Card -->
       <div class="ce-card ce-config-card">
         <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg><span>{lang.capacityAndSettings}</span></div>
         <div class="ce-dual-row"><div class="ce-input-group"><label>{lang.capacityLabel} <span class="ce-req">*</span></label><input type="number" bind:value={formData.totalSlots} placeholder="100" class="ce-input" class:error={validationErrors.has("totalSlots")} min="1" /></div><div class="ce-input-group"><label>{lang.distanceLabel}</label><input type="number" bind:value={formData.distanceKm} placeholder="5.0" class="ce-input" min="0" step="0.1" /></div></div>
       </div>
 
-      <!-- Holidays Card (Multi-day only) -->
       {#if formData.eventType === "multi_day"}
       <div class="ce-card ce-config-card">
         <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg><span>{lang.holidaysAndExclusions}</span></div>
@@ -1067,7 +1073,6 @@
       </div>
       {/if}
 
-      <!-- Rewards Card -->
       <div class="ce-card ce-config-card">
         <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"></path></svg><span>{lang.rewardsDistribution}</span></div>
         
@@ -1116,7 +1121,6 @@
         <button type="button" class="ce-btn-add-tier" on:click={addRewardTier}>{lang.addTierBtn}</button>
       </div>
 
-      <!-- Status Card - Only show when editing -->
       {#if editingEventId}
       <div class="ce-card ce-config-card">
         <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg><span>{lang.eventStatusTitle}</span></div>

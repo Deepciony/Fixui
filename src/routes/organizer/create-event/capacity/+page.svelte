@@ -5,7 +5,7 @@
   import { t } from '../../_lib/i18n';
   import { onMount } from 'svelte';
   
-  // [สำคัญ] Import ข้อมูลวันหยุด
+  // [สำคัญ] ดึงข้อมูลวันหยุด
   import holidaysData from '$lib/data/holidays.json'; 
 
   $: lang = $appState.currentLang;
@@ -24,7 +24,6 @@
     totalSlots: null as number | null,
     distanceKm: null as number | null,
     holidays: [] as string[],
-    // เพิ่ม Type ให้ครบ
     holidayMode: null as 'weekends' | 'specific' | 'none' | 'public' | 'weekends_public' | null
   };
   
@@ -37,9 +36,10 @@
     ? ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
     : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   
-  // ปรับปีเริ่มต้นเป็นปีปัจจุบัน
-  const currentYear = new Date().getFullYear();
-  const ce_years = Array.from({ length: 10 }, (_, i) => currentYear + i);
+  // [ปรับแก้] เริ่มต้นปีที่ 2026 เพื่อให้ตรงกับไฟล์ holidays.json ของคุณ
+  // ถ้าต้องการปีปัจจุบันให้แก้เป็น new Date().getFullYear()
+  const startYear = 2026; 
+  const ce_years = Array.from({ length: 10 }, (_, i) => startYear + i);
   
   const ce_timeList = Array.from({ length: 48 }, (_, i) => {
     const h = Math.floor(i / 2);
@@ -48,16 +48,22 @@
   });
 
   onMount(() => {
+    // ตรวจสอบว่าโหลดไฟล์ JSON ได้หรือไม่
+    console.log("Loaded Holidays Data:", holidaysData.length, "entries");
+
     const storeData = $eventForm as any;
-    // โหลดข้อมูลเดิมถ้ามี
     if (storeData.sDay) {
-      ce_formData = { ...storeData };
+      ce_formData = { 
+        ...ce_formData, 
+        ...storeData,
+        // ป้องกัน holidays หาย
+        holidays: Array.isArray(storeData.holidays) ? storeData.holidays : []
+      };
     }
-    // ตรวจสอบช่วงเวลาแต่ยังไม่ต้องคำนวณวันหยุดใหม่ทันทีเพื่อรักษาค่าเดิมไว้
     validateDateRangeOnly();
   });
 
-  // Helper: แปลงวันที่เป็น String YYYY-MM-DD เพื่อเทียบกับ JSON
+  // แปลงวันที่เป็น YYYY-MM-DD เพื่อเทียบกับ JSON
   function formatDateKey(day: string | number, month: string, year: string | number): string {
     const d = String(day).padStart(2, '0');
     const m = String(month).padStart(2, '0');
@@ -65,17 +71,22 @@
     return `${y}-${m}-${d}`;
   }
 
-  // ฟังก์ชันคำนวณวันหยุดราชการ (ใช้ String Comparison แม่นยำกว่า)
+  // ฟังก์ชันคำนวณวันหยุด
   function calculatePublicHolidays() {
     if (!isDateRangeValid) return [];
     
     const startStr = formatDateKey(ce_formData.sDay, ce_formData.sMonth, ce_formData.sYear);
     const endStr = formatDateKey(ce_formData.eDay, ce_formData.eMonth, ce_formData.eYear);
 
-    // กรองวันหยุดจาก JSON ที่อยู่ในช่วงเวลา (รวมวันเริ่มและวันสิ้นสุด)
-    return holidaysData
+    console.log(`Searching for holidays between ${startStr} and ${endStr}`);
+
+    // กรองวันหยุดในช่วงเวลา
+    const found = holidaysData
         .filter((h: any) => h.date >= startStr && h.date <= endStr)
         .map((h: any) => h.date);
+    
+    console.log("Found holidays:", found);
+    return found;
   }
 
   function validateDateRangeOnly() {
@@ -92,11 +103,11 @@
   function checkDateRangeAndRefreshHolidays() {
     validateDateRangeOnly();
 
-    // ถ้าช่วงเวลาถูกต้อง และกำลังเลือกโหมดวันหยุดราชการอยู่ ให้คำนวณวันหยุดใหม่
+    // ถ้าวันที่มีการเปลี่ยนแปลง และอยู่ในโหมด Auto ให้คำนวณใหม่ทันที
     if (isDateRangeValid && (ce_formData.holidayMode === 'public' || ce_formData.holidayMode === 'weekends_public')) {
         const newHolidays = calculatePublicHolidays();
         ce_formData.holidays = newHolidays;
-        ce_formData = { ...ce_formData }; // Force Svelte update
+        ce_formData = { ...ce_formData }; // Force Update UI
     }
   }
   
@@ -107,7 +118,7 @@
   function ce_selectOpt(field: string, value: any) {
     (ce_formData as any)[field] = String(value);
     ce_activeDropdown = null;
-    checkDateRangeAndRefreshHolidays(); // เปลี่ยนวันที่ -> คำนวณวันหยุดใหม่
+    checkDateRangeAndRefreshHolidays(); // สำคัญ: คำนวณวันหยุดใหม่เมื่อเปลี่ยนวันที่
   }
   
   function ce_selectCombo(field: string, value: any) {
@@ -115,33 +126,24 @@
     ce_activeDropdown = null;
   }
   
-  // Logic การเลือกโหมดวันหยุด
+  // Logic การเลือกโหมด
   function ce_setHolidayMode(mode: 'weekends' | 'specific' | 'none' | 'public' | 'weekends_public' | null) {
     if (ce_formData.holidayMode === mode) {
-      // กรณีกดซ้ำเพื่อยกเลิก (ให้กลับไปเป็น none หรือ specific)
       ce_formData.holidayMode = 'none';
       ce_formData.holidays = [];
     } else {
       ce_formData.holidayMode = mode;
       
       if (mode === 'public' || mode === 'weekends_public') {
-         // ดึงข้อมูลวันหยุดทันที
+         // ดึงข้อมูลวันหยุด
          const found = calculatePublicHolidays();
          ce_formData.holidays = found;
-         
-         if (found.length === 0) {
-             console.log('No public holidays found in range:', 
-                formatDateKey(ce_formData.sDay, ce_formData.sMonth, ce_formData.sYear), 
-                'to', 
-                formatDateKey(ce_formData.eDay, ce_formData.eMonth, ce_formData.eYear)
-             );
-         }
       } else {
-         // โหมดอื่นๆ เคลียร์วันหยุด (Specific ต้องกดเพิ่มเอง)
+         // โหมดอื่นๆ เคลียร์วันหยุด
          ce_formData.holidays = [];
       }
     }
-    ce_formData = { ...ce_formData }; // Force Update UI
+    ce_formData = { ...ce_formData };
   }
   
   function ce_toggleHoliday(date: string) {
@@ -174,7 +176,7 @@
   
   function handleNext() {
     if (!validateForm()) return;
-    // บันทึกข้อมูลลง Store ก่อนเปลี่ยนหน้า
+    console.log("Saving Event Data:", ce_formData);
     eventForm.set({ ...$eventForm, ...ce_formData } as any);
     goto('/organizer/create-event/rewards');
   }
@@ -206,98 +208,60 @@
 
       <div class="ce-dual-row">
         <div class="ce-input-group">
-          <div class="ce-label-wrapper">
-            <span class="ce-label">{t('startDateLabel')} <span class="ce-req">*</span></span>
-          </div>
+          <div class="ce-label-wrapper"><span class="ce-label">{t('startDateLabel')} <span class="ce-req">*</span></span></div>
           <div class="ce-date-row compact-gap" class:error={ce_validationErrors.has('startDate')}>
             <div class="ce-dd-wrap flex-1-5">
               <button type="button" class="ce-trigger" on:click|stopPropagation={() => ce_toggleDD('sDay')}>
-                <input type="text" value={ce_formData.sDay} placeholder={lang === 'th' ? 'วัน' : 'Day'} class="ce-input-dis" readonly />
-                <span class="ce-arrow">▼</span>
+                <input type="text" value={ce_formData.sDay} placeholder={lang === 'th' ? 'วัน' : 'Day'} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span>
               </button>
               {#if ce_activeDropdown === 'sDay'}
-                <div class="ce-options">
-                  {#each ce_days as d}
-                    <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('sDay', d)}>{d}</button>
-                  {/each}
-                </div>
+                <div class="ce-options">{#each ce_days as d} <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('sDay', d)}>{d}</button> {/each}</div>
               {/if}
             </div>
-
             <div class="ce-dd-wrap flex-2">
               <button type="button" class="ce-trigger" on:click|stopPropagation={() => ce_toggleDD('sMonth')}>
-                <input type="text" value={translateMonth(ce_formData.sMonth)} placeholder={lang === 'th' ? 'เดือน' : 'Month'} class="ce-input-dis" readonly />
-                <span class="ce-arrow">▼</span>
+                <input type="text" value={translateMonth(ce_formData.sMonth)} placeholder={lang === 'th' ? 'เดือน' : 'Month'} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span>
               </button>
               {#if ce_activeDropdown === 'sMonth'}
-                <div class="ce-options">
-                  {#each ce_months as m, idx}
-                    <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('sMonth', m)}>{ce_displayMonths[idx]}</button>
-                  {/each}
-                </div>
+                <div class="ce-options">{#each ce_months as m, idx} <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('sMonth', m)}>{ce_displayMonths[idx]}</button> {/each}</div>
               {/if}
             </div>
-
             <div class="ce-dd-wrap flex-1-5">
               <button type="button" class="ce-trigger" on:click|stopPropagation={() => ce_toggleDD('sYear')}>
-                <input type="text" value={ce_formData.sYear} placeholder={lang === 'th' ? 'ปี' : 'Year'} class="ce-input-dis" readonly />
-                <span class="ce-arrow">▼</span>
+                <input type="text" value={ce_formData.sYear} placeholder={lang === 'th' ? 'ปี' : 'Year'} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span>
               </button>
               {#if ce_activeDropdown === 'sYear'}
-                <div class="ce-options">
-                  {#each ce_years as y}
-                    <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('sYear', y)}>{y}</button>
-                  {/each}
-                </div>
+                <div class="ce-options">{#each ce_years as y} <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('sYear', y)}>{y}</button> {/each}</div>
               {/if}
             </div>
           </div>
         </div>
 
         <div class="ce-input-group">
-          <div class="ce-label-wrapper">
-            <span class="ce-label">{t('endDateLabel')} <span class="ce-req">*</span></span>
-          </div>
+          <div class="ce-label-wrapper"><span class="ce-label">{t('endDateLabel')} <span class="ce-req">*</span></span></div>
           <div class="ce-date-row compact-gap" class:error={ce_validationErrors.has('endDate')}>
             <div class="ce-dd-wrap flex-1-5">
               <button type="button" class="ce-trigger" on:click|stopPropagation={() => ce_toggleDD('eDay')}>
-                <input type="text" value={ce_formData.eDay} placeholder={lang === 'th' ? 'วัน' : 'Day'} class="ce-input-dis" readonly />
-                <span class="ce-arrow">▼</span>
+                <input type="text" value={ce_formData.eDay} placeholder={lang === 'th' ? 'วัน' : 'Day'} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span>
               </button>
               {#if ce_activeDropdown === 'eDay'}
-                <div class="ce-options">
-                  {#each ce_days as d}
-                    <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('eDay', d)}>{d}</button>
-                  {/each}
-                </div>
+                <div class="ce-options">{#each ce_days as d} <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('eDay', d)}>{d}</button> {/each}</div>
               {/if}
             </div>
-
             <div class="ce-dd-wrap flex-2">
               <button type="button" class="ce-trigger" on:click|stopPropagation={() => ce_toggleDD('eMonth')}>
-                <input type="text" value={translateMonth(ce_formData.eMonth)} placeholder={lang === 'th' ? 'เดือน' : 'Month'} class="ce-input-dis" readonly />
-                <span class="ce-arrow">▼</span>
+                <input type="text" value={translateMonth(ce_formData.eMonth)} placeholder={lang === 'th' ? 'เดือน' : 'Month'} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span>
               </button>
               {#if ce_activeDropdown === 'eMonth'}
-                <div class="ce-options">
-                  {#each ce_months as m, idx}
-                    <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('eMonth', m)}>{ce_displayMonths[idx]}</button>
-                  {/each}
-                </div>
+                <div class="ce-options">{#each ce_months as m, idx} <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('eMonth', m)}>{ce_displayMonths[idx]}</button> {/each}</div>
               {/if}
             </div>
-
             <div class="ce-dd-wrap flex-1-5">
               <button type="button" class="ce-trigger" on:click|stopPropagation={() => ce_toggleDD('eYear')}>
-                <input type="text" value={ce_formData.eYear} placeholder={lang === 'th' ? 'ปี' : 'Year'} class="ce-input-dis" readonly />
-                <span class="ce-arrow">▼</span>
+                <input type="text" value={ce_formData.eYear} placeholder={lang === 'th' ? 'ปี' : 'Year'} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span>
               </button>
               {#if ce_activeDropdown === 'eYear'}
-                <div class="ce-options">
-                  {#each ce_years as y}
-                    <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('eYear', y)}>{y}</button>
-                  {/each}
-                </div>
+                <div class="ce-options">{#each ce_years as y} <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectOpt('eYear', y)}>{y}</button> {/each}</div>
               {/if}
             </div>
           </div>
@@ -310,79 +274,48 @@
 
       <div class="ce-time-capacity-row">
         <div class="ce-input-group">
-          <div class="ce-label-wrapper">
-            <span class="ce-label">{t('startTimeLabel')} <span class="ce-req">*</span></span>
-          </div>
-          <div class="ce-dd-wrap" class:error={ce_validationErrors.has('startTime')}>
-            <button type="button" class="ce-trigger-compact" on:click|stopPropagation={() => ce_toggleDD('startTime')}>
-              <input type="text" bind:value={ce_formData.startTime} placeholder="00:00" class="ce-input-inline" maxlength="5" />
-              <span class="ce-arrow">▼</span>
-            </button>
-            {#if ce_activeDropdown === 'startTime'}
-              <div class="ce-options">
-                {#each ce_timeList as t}
-                  <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectCombo('startTime', t)}>{t}</button>
-                {/each}
-              </div>
-            {/if}
-          </div>
+           <div class="ce-label-wrapper"><span class="ce-label">{t('startTimeLabel')} <span class="ce-req">*</span></span></div>
+           <div class="ce-dd-wrap" class:error={ce_validationErrors.has('startTime')}>
+             <button type="button" class="ce-trigger-compact" on:click|stopPropagation={() => ce_toggleDD('startTime')}>
+               <input type="text" bind:value={ce_formData.startTime} placeholder="00:00" class="ce-input-inline" maxlength="5" /><span class="ce-arrow">▼</span>
+             </button>
+             {#if ce_activeDropdown === 'startTime'}
+               <div class="ce-options">{#each ce_timeList as t} <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectCombo('startTime', t)}>{t}</button> {/each}</div>
+             {/if}
+           </div>
         </div>
-
         <div class="ce-input-group">
-          <div class="ce-label-wrapper">
-            <span class="ce-label">{t('endTimeLabel')} <span class="ce-req">*</span></span>
-          </div>
-          <div class="ce-dd-wrap" class:error={ce_validationErrors.has('endTime')}>
-            <button type="button" class="ce-trigger-compact" on:click|stopPropagation={() => ce_toggleDD('endTime')}>
-              <input type="text" bind:value={ce_formData.endTime} placeholder="00:00" class="ce-input-inline" maxlength="5" />
-              <span class="ce-arrow">▼</span>
-            </button>
-            {#if ce_activeDropdown === 'endTime'}
-              <div class="ce-options">
-                {#each ce_timeList as t}
-                  <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectCombo('endTime', t)}>{t}</button>
-                {/each}
-              </div>
-            {/if}
-          </div>
+           <div class="ce-label-wrapper"><span class="ce-label">{t('endTimeLabel')} <span class="ce-req">*</span></span></div>
+           <div class="ce-dd-wrap" class:error={ce_validationErrors.has('endTime')}>
+             <button type="button" class="ce-trigger-compact" on:click|stopPropagation={() => ce_toggleDD('endTime')}>
+               <input type="text" bind:value={ce_formData.endTime} placeholder="00:00" class="ce-input-inline" maxlength="5" /><span class="ce-arrow">▼</span>
+             </button>
+             {#if ce_activeDropdown === 'endTime'}
+               <div class="ce-options">{#each ce_timeList as t} <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectCombo('endTime', t)}>{t}</button> {/each}</div>
+             {/if}
+           </div>
         </div>
-
         <div class="ce-input-group">
-          <div class="ce-label-wrapper">
-            <span class="ce-label">{t('capacityLabel')} <span class="ce-req">*</span></span>
-          </div>
-          <div class="ce-dd-wrap" class:error={ce_validationErrors.has('totalSlots')}>
-            <button type="button" class="ce-trigger-compact" on:click|stopPropagation={() => ce_toggleDD('slots')}>
-              <input type="number" min="0" bind:value={ce_formData.totalSlots} placeholder={lang === 'th' ? 'สูงสุด' : 'Max'} class="ce-input-inline" />
-              <span class="ce-arrow">▼</span>
-            </button>
-            {#if ce_activeDropdown === 'slots'}
-              <div class="ce-options">
-                {#each [50, 100, 200, 500, 1000, 2000, 5000] as s}
-                  <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectCombo('totalSlots', s)}>{s} {lang === 'th' ? 'ที่นั่ง' : 'Slots'}</button>
-                {/each}
-              </div>
-            {/if}
-          </div>
+           <div class="ce-label-wrapper"><span class="ce-label">{t('capacityLabel')} <span class="ce-req">*</span></span></div>
+           <div class="ce-dd-wrap" class:error={ce_validationErrors.has('totalSlots')}>
+             <button type="button" class="ce-trigger-compact" on:click|stopPropagation={() => ce_toggleDD('slots')}>
+               <input type="number" min="0" bind:value={ce_formData.totalSlots} placeholder={lang === 'th' ? 'สูงสุด' : 'Max'} class="ce-input-inline" /><span class="ce-arrow">▼</span>
+             </button>
+             {#if ce_activeDropdown === 'slots'}
+               <div class="ce-options">{#each [50, 100, 200, 500, 1000, 2000, 5000] as s} <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectCombo('totalSlots', s)}>{s} {lang === 'th' ? 'ที่นั่ง' : 'Slots'}</button> {/each}</div>
+             {/if}
+           </div>
         </div>
       </div>
 
       <div class="ce-input-group">
-        <div class="ce-label-wrapper">
-           <span class="ce-label">{t('distanceLabel')}</span>
-        </div>
+        <div class="ce-label-wrapper"><span class="ce-label">{t('distanceLabel')}</span></div>
         <div class="ce-dd-wrap">
           <button type="button" class="ce-trigger-compact" on:click|stopPropagation={() => ce_toggleDD('distanceKm')}>
-            <input type="number" min="0" step="1" bind:value={ce_formData.distanceKm} placeholder="0" class="ce-input-inline" />
-            <span class="ce-unit-label">km</span>
-            <span class="ce-arrow">▼</span>
+            <input type="number" min="0" step="1" bind:value={ce_formData.distanceKm} placeholder="0" class="ce-input-inline" /><span class="ce-unit-label">km</span><span class="ce-arrow">▼</span>
           </button>
           {#if ce_activeDropdown === 'distanceKm'}
-            <div class="ce-options">
-              {#each [1, 2, 3, 5, 10, 15, 21, 42] as d}
-                <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectCombo('distanceKm', d)}>{d} km</button>
-              {/each}
-            </div>
+            <div class="ce-options">{#each [1, 2, 3, 5, 10, 15, 21, 42] as d} <button type="button" class="ce-opt" on:click|stopPropagation={() => ce_selectCombo('distanceKm', d)}>{d} km</button> {/each}</div>
           {/if}
         </div>
       </div>
@@ -449,7 +382,9 @@
           <div class="ce-tags" style="margin-top: 10px;">
             {#if ce_formData.holidays.length === 0}
                {#if ce_formData.holidayMode === 'public' || ce_formData.holidayMode === 'weekends_public'}
-                  <span style="color: #64748b; font-size: 0.85rem;">{lang === 'th' ? 'ไม่พบวันหยุดในช่วงเวลานี้ (ตรวจสอบปี)' : 'No holidays found in range'}</span>
+                  <span style="color: #f59e0b; font-size: 0.85rem;">
+                    {lang === 'th' ? '⚠️ ไม่พบวันหยุดในช่วงเวลานี้ (ข้อมูลวันหยุดมีปี 2026-2030 เท่านั้น)' : '⚠️ No holidays found in range. (Data available for 2026-2030)'}
+                  </span>
                {:else}
                   <span style="color: #64748b; font-size: 0.85rem;">{lang === 'th' ? 'ยังไม่มีวันหยุดที่เลือก' : 'No holidays selected'}</span>
                {/if}
@@ -468,16 +403,12 @@
 
     <div class="ce-nav-buttons">
       <button type="button" class="ce-btn-cancel" on:click={handleBack}>
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-        </svg>
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
         {t('back')}
       </button>
       <button type="button" class="ce-btn-save" on:click={handleNext}>
         {t('next')}
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-        </svg>
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
       </button>
     </div>
   </div>
@@ -521,8 +452,6 @@
   .ce-locked-card { opacity: 0.5; pointer-events: none; border-style: dashed; border-color: #475569; filter: grayscale(0.8); }
   .ce-lock-overlay { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.85); z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 20px; color: #e2e8f0; font-weight: 500; backdrop-filter: blur(2px); gap: 10px; }
   .ce-lock-icon-svg { width: 48px; height: 48px; color: #64748b; margin-bottom: 10px; }
-  
-  /* Holiday Buttons Grid */
   .ce-holiday-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
   .ce-check-row { display: flex; align-items: center; gap: 15px; cursor: pointer; padding: 14px; background: #0f172a; border-radius: 12px; border: 1px solid #334155; transition: 0.2s; user-select: none; }
   .ce-check-row:hover { border-color: #64748b; background: #162032; }

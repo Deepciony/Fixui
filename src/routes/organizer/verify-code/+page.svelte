@@ -3,6 +3,9 @@
   import axios from 'axios';
   import jsQR from 'jsqr';
   
+  // ✅ Import API Endpoints
+  import { endpoints } from '../_lib/api/endpoints';
+
   // API Configuration
   const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
   
@@ -16,6 +19,17 @@
     if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
   });
+
+  // ✅ เพิ่ม Interceptor เพื่อจัดการ 404 เงียบๆ
+  api.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      if (error.response && error.response.status === 404) {
+         return Promise.reject(error);
+      }
+      return Promise.reject(error);
+    }
+  );
   
   // Language
   type Language = "th" | "en";
@@ -36,11 +50,12 @@
       verifyParticipantCodeOut: "ตรวจสอบรหัสเช็คเอาท์",
       pinCode: "รหัส PIN",
       scanQR: "สแกน QR",
-      enterDigitCode: "กรอกรหัส 6 หลัก",
+      enterDigitCode: "กรอกรหัส 5 หลัก", // ✅ แก้ข้อความ
       autoCheckInEnabled: "Auto Check-in เปิดอยู่",
       autoCheckOutEnabled: "Auto Check-out เปิดอยู่",
       pressCheckIn: "กดปุ่มเพื่อเช็คอิน",
       pressCheckOut: "กดปุ่มเพื่อเช็คเอาท์",
+      checkInSuccess: "เช็คอินสำเร็จ", // ✅ เพิ่ม
       checkOutSuccess: "เช็คเอาท์สำเร็จ",
       invalidCode: "รหัสไม่ถูกต้อง",
       alreadyCheckedIn: "เช็คอินแล้ว",
@@ -58,11 +73,12 @@
       verifyParticipantCodeOut: "Verify check-out code",
       pinCode: "PIN Code",
       scanQR: "Scan QR",
-      enterDigitCode: "Enter 6-digit code",
+      enterDigitCode: "Enter 5-digit code", // ✅ แก้ข้อความ
       autoCheckInEnabled: "Auto Check-in enabled",
       autoCheckOutEnabled: "Auto Check-out enabled",
       pressCheckIn: "Press button to check-in",
       pressCheckOut: "Press button to check-out",
+      checkInSuccess: "Check-in successful", // ✅ เพิ่ม
       checkOutSuccess: "Check-out successful",
       invalidCode: "Invalid code",
       alreadyCheckedIn: "Already checked in",
@@ -86,8 +102,8 @@
   let verifyErrorMessage = "";
   let verifyErrorIndex: number | null = null;
   
-  // PIN Mode
-  let pins = ["", "", "", "", "", ""];
+  // ✅ [แก้ไข 1] PIN Mode: เหลือ 5 ช่อง
+  let pins = ["", "", "", "", ""];
   let pinInputRefs: HTMLInputElement[] = [];
   
   // QR Mode
@@ -98,6 +114,7 @@
   let cameraError = "";
   let qrSuccessShow = false;
   let scanInterval: any;
+  let animationFrameId: number;
   
   // Functions
   function switchActionMode(mode: "checkin" | "checkout") {
@@ -121,7 +138,7 @@
   }
   
   function clearPins() {
-    pins = ["", "", "", "", "", ""];
+    pins = ["", "", "", "", ""]; // ✅ 5 ช่อง
     verifyErrorMessage = "";
     verifyErrorIndex = null;
     pinInputRefs[0]?.focus();
@@ -131,7 +148,6 @@
     const input = event.target as HTMLInputElement;
     const value = input.value;
     
-    // Only allow numbers
     if (value && !/^\d$/.test(value)) {
       pins[index] = "";
       return;
@@ -139,12 +155,11 @@
     
     pins[index] = value;
     
-    // Move to next input
-    if (value && index < 5) {
+    // ✅ [แก้ไข 2] เลื่อน focus: index < 4 (เพราะช่องสุดท้ายคือ index 4)
+    if (value && index < 4) {
       pinInputRefs[index + 1]?.focus();
     }
     
-    // Auto submit if enabled and all filled
     if (autoCheckIn && pins.every(p => p !== "")) {
       handleVerifyPin();
     }
@@ -163,19 +178,37 @@
   
   async function handleVerifyPin() {
     const code = pins.join("");
-    if (code.length !== 6) return;
+    // ✅ [แก้ไข 3] ตรวจสอบความยาว 5 หลัก
+    if (code.length !== 5) return;
     
+    verifyCode(code, 'pin');
+  }
+
+  // ✅ Unified Verification Logic with Real API
+  async function verifyCode(code: string, type: 'pin' | 'qr') {
+    if (isVerifying) return;
+
     isVerifying = true;
     verifyErrorMessage = "";
     verifyErrorIndex = null;
-    
+
     try {
-      const endpoint = verifyActionMode === "checkout" ? '/api/checkout/pin' : '/api/checkin/pin';
-      const response = await api.post(endpoint, { code });
+      // ✅ เลือก Endpoint ให้ถูกต้องตามประเภท
+      const endpoint = verifyActionMode === "checkout" 
+        ? endpoints.participants.checkOut 
+        : endpoints.participants.checkIn;
       
+      const payload = type === 'pin' 
+          ? { code, type: 'pin' } 
+          : { qr_data: code, type: 'qr' };
+
+      const response = await api.post(endpoint, payload);
+
       // Success
-      lastParticipantName = response.data.participant_name || "Participant";
-      
+      lastParticipantName = response.data.participant_name || 
+                            response.data.user?.name || 
+                            "Participant";
+
       if (verifyActionMode === "checkout") {
         lastCheckOutSuccess = true;
         setTimeout(() => { lastCheckOutSuccess = false; }, 3000);
@@ -183,34 +216,87 @@
         lastVerifySuccess = true;
         setTimeout(() => { lastVerifySuccess = false; }, 3000);
       }
-      
-      clearPins();
-      
+
+      // แสดง Success ใน QR Mode ด้วย
+      if (type === 'qr') {
+          qrSuccessShow = true;
+          setTimeout(() => { 
+              qrSuccessShow = false; 
+              // Resume scanning
+              if (verifyMode === 'qr' && !scanning) {
+                  scanning = true;
+                  requestAnimationFrame(scanFrame);
+              } else if (verifyMode === 'qr') {
+                  requestAnimationFrame(scanFrame);
+              }
+          }, 2000);
+      }
+
+      if (type === 'pin') clearPins();
+
     } catch (error: any) {
-      verifyErrorMessage = error.response?.data?.message || lang.invalidCode;
-      verifyErrorIndex = 0;
+      verifyErrorMessage = error.response?.data?.message || error.response?.data?.detail || lang.invalidCode;
+      if (type === 'pin') verifyErrorIndex = 0;
+      
+      // QR Error: Delay slightly before rescanning
+      if (type === 'qr') {
+          setTimeout(() => {
+              if (verifyMode === 'qr') requestAnimationFrame(scanFrame);
+          }, 1500);
+      }
     } finally {
-      isVerifying = false;
+      if (type === 'pin') isVerifying = false;
+      // QR mode resets isVerifying after delay in success block or immediately in error
+      if (type === 'qr' && verifyErrorMessage) isVerifying = false;
+      if (type === 'qr' && !verifyErrorMessage) {
+           setTimeout(() => { isVerifying = false; }, 2000);
+      }
     }
   }
   
-  // QR Scanner
+  // ✅ QR Scanner (Improved Error Handling)
   async function startCamera() {
     cameraError = "";
+    
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        cameraError = "ไม่พบกล้องในอุปกรณ์นี้";
+        return;
+    }
+
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" }
-      });
-      
-      if (videoRef) {
-        videoRef.srcObject = stream;
-        await videoRef.play();
-        scanning = true;
-        startScanning();
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" }
+        });
+      } catch (e) {
+        console.warn("Environment camera failed, trying fallback");
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true
+        });
       }
-    } catch (error) {
-      cameraError = lang.cameraAccessDenied;
-      console.error("Camera error:", error);
+      
+      if (videoRef && stream) {
+        videoRef.srcObject = stream;
+        videoRef.setAttribute("playsinline", "true");
+        
+        videoRef.onloadedmetadata = () => {
+            videoRef.play().then(() => {
+                scanning = true;
+                requestAnimationFrame(scanFrame);
+            }).catch(e => {
+                console.error("Video play error:", e);
+                cameraError = lang.cameraAccessDenied;
+            });
+        };
+      }
+    } catch (error: any) {
+      if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+          cameraError = "ไม่พบกล้อง";
+      } else if (error.name === 'NotAllowedError') {
+          cameraError = "กรุณาอนุญาตให้เข้าถึงกล้อง";
+      } else {
+          cameraError = lang.cameraAccessDenied;
+      }
     }
   }
   
@@ -220,67 +306,42 @@
       stream = null;
     }
     scanning = false;
-    if (scanInterval) {
-      clearInterval(scanInterval);
-    }
+    if (animationFrameId) cancelAnimationFrame(animationFrameId);
   }
   
-  function startScanning() {
-    if (scanInterval) clearInterval(scanInterval);
+  function scanFrame() {
+    if (!videoRef || !canvasRef || !scanning) return;
     
-    scanInterval = setInterval(() => {
-      if (!videoRef || !canvasRef || !scanning || isVerifying) return;
-      
-      const canvas = canvasRef;
-      const video = videoRef;
-      const ctx = canvas.getContext("2d");
-      
-      if (!ctx) return;
-      
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const code = jsQR(imageData.data, imageData.width, imageData.height);
-      
-      if (code) {
-        handleQRCode(code.data);
-      }
-    }, 100);
-  }
-  
-  async function handleQRCode(data: string) {
-    if (isVerifying) return;
-    
-    isVerifying = true;
-    verifyErrorMessage = "";
-    
-    try {
-      const endpoint = verifyActionMode === "checkout" ? '/api/checkout/qr' : '/api/checkin/qr';
-      const response = await api.post(endpoint, { qr_data: data });
-      
-      // Success
-      lastParticipantName = response.data.participant_name || "Participant";
-      qrSuccessShow = true;
-      
-      if (verifyActionMode === "checkout") {
-        lastCheckOutSuccess = true;
-      } else {
-        lastVerifySuccess = true;
-      }
-      
-      setTimeout(() => {
-        qrSuccessShow = false;
-        lastVerifySuccess = false;
-        lastCheckOutSuccess = false;
-      }, 2000);
-      
-    } catch (error: any) {
-      verifyErrorMessage = error.response?.data?.message || lang.invalidCode;
-    } finally {
-      isVerifying = false;
+    // Pause checking if verification is in progress
+    if (isVerifying || qrSuccessShow) {
+       animationFrameId = requestAnimationFrame(scanFrame);
+       return;
     }
+
+    const canvas = canvasRef;
+    const video = videoRef;
+    
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) return;
+        
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        
+        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: "dontInvert",
+        });
+        
+        if (code && code.data) {
+            verifyCode(code.data, 'qr');
+            return;
+        }
+    }
+    
+    animationFrameId = requestAnimationFrame(scanFrame);
   }
   
   onMount(() => {
@@ -294,7 +355,6 @@
 
 <div class="vc-container">
   <div class="vc-main-card">
-    <!-- ACTION MODE SELECTOR (Check-in / Check-out) -->
     <div class="vc-action-selector">
       <button class="vc-action-tab" class:active={verifyActionMode === "checkin"} on:click={() => switchActionMode("checkin")}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -317,7 +377,6 @@
       <div class="vc-action-slider" class:checkout={verifyActionMode === "checkout"}></div>
     </div>
 
-    <!-- CARD HEADER -->
     <div class="vc-card-header">
       <div class="vc-icon-wrapper" class:checkout={verifyActionMode === "checkout"}>
         <div class="vc-icon-bg"></div>
@@ -337,7 +396,6 @@
       <p class="vc-subtitle">{verifyActionMode === "checkout" ? lang.verifyParticipantCodeOut : lang.verifyParticipantCode}</p>
     </div>
 
-    <!-- MODE SELECTOR (PIN / QR) -->
     <div class="vc-mode-selector" class:checkout={verifyActionMode === "checkout"}>
       <button class="vc-mode-tab" class:active={verifyMode === "pin"} class:checkout={verifyActionMode === "checkout"} on:click={() => switchVerifyMode("pin")}>
         <div class="vc-mode-icon">
@@ -367,7 +425,6 @@
       <div class="vc-mode-slider" class:qr={verifyMode === "qr"} class:checkout={verifyActionMode === "checkout"}></div>
     </div>
 
-    <!-- SUCCESS MESSAGE -->
     {#if lastVerifySuccess}
       <div class="vc-success">
         <div class="vc-success-check">
@@ -396,11 +453,8 @@
       </div>
     {/if}
 
-    <!-- CONTENT AREA -->
     <div class="vc-content">
-      <!-- PIN MODE -->
       <div class="vc-pin-mode" class:active={verifyMode === "pin"}>
-        <!-- Auto Toggle -->
         <div class="vc-auto-toggle">
           <div class="vc-auto-info">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -413,7 +467,6 @@
           </button>
         </div>
 
-        <!-- PIN INPUT -->
         <div class="vc-pin-area">
           <div class="vc-pin-row">
             {#each pins as pin, i}
@@ -424,7 +477,6 @@
           </div>
         </div>
 
-        <!-- ERROR -->
         {#if verifyErrorMessage && verifyMode === "pin"}
           <div class="vc-error-msg">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -436,7 +488,6 @@
           </div>
         {/if}
 
-        <!-- SUBMIT BUTTON -->
         <div class="vc-submit-wrapper" class:hidden={autoCheckIn}>
           <button class="vc-submit" class:checkout={verifyActionMode === "checkout"} on:click={handleVerifyPin} disabled={isVerifying || pins.some((p) => p === "") || autoCheckIn}>
             {#if isVerifying}
@@ -458,7 +509,6 @@
           </button>
         </div>
 
-        <!-- LOADING STATE -->
         {#if isVerifying && autoCheckIn}
           <div class="vc-verifying">
             <span class="vc-loader lg"></span>
@@ -466,7 +516,6 @@
           </div>
         {/if}
 
-        <!-- HINT -->
         <p class="vc-hint">
           {#if autoCheckIn}
             {lang.enterDigitCode} • {verifyActionMode === "checkout" ? lang.autoCheckOutEnabled : lang.autoCheckInEnabled}
@@ -476,7 +525,6 @@
         </p>
       </div>
 
-      <!-- QR MODE -->
       <div class="vc-qr-mode" class:active={verifyMode === "qr"}>
         <div class="vc-scanner">
           {#if cameraError}
@@ -499,7 +547,6 @@
             <video bind:this={videoRef} class="vc-video" playsinline muted></video>
             <canvas bind:this={canvasRef} class="vc-canvas"></canvas>
 
-            <!-- SCANNER OVERLAY -->
             <div class="vc-scan-overlay">
               <div class="vc-scan-frame" class:active={scanning && !isVerifying && !qrSuccessShow} class:success={qrSuccessShow} class:checkout={verifyActionMode === "checkout"}>
                 <span class="vc-frame-corner tl"></span>
@@ -511,7 +558,6 @@
                 {/if}
               </div>
 
-              <!-- QR SUCCESS OVERLAY -->
               {#if qrSuccessShow}
                 <div class="vc-qr-success" class:checkout={verifyActionMode === "checkout"}>
                   <div class="vc-qr-success-icon" class:checkout={verifyActionMode === "checkout"}>
@@ -527,7 +573,6 @@
               {/if}
             </div>
 
-            <!-- STATUS BADGE -->
             {#if isVerifying}
               <div class="vc-scan-status verifying">
                 <span class="vc-loader sm"></span>
@@ -549,7 +594,6 @@
           {/if}
         </div>
 
-        <!-- ERROR -->
         {#if verifyErrorMessage && verifyMode === "qr"}
           <div class="vc-error-msg">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -565,10 +609,6 @@
     </div>
   </div>
 </div>
-
-ENDFILE
-
-echo "Script and HTML complete, adding CSS..."
 
 <style>
   /* CONTAINER */
@@ -623,11 +663,11 @@ echo "Script and HTML complete, adding CSS..."
   }
 
   .vc-action-tab.active {
-    color: #10b981;
+    color: #ffffff;
   }
 
   .vc-action-tab.checkout.active {
-    color: #f59e0b;
+    color: #ffffff;
   }
 
   .vc-action-slider {
@@ -922,7 +962,8 @@ echo "Script and HTML complete, adding CSS..."
 
   .vc-pin-row {
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    /* ✅ แก้เป็น 5 คอลัมน์ */
+    grid-template-columns: repeat(5, 1fr);
     gap: 0.75rem;
   }
 
