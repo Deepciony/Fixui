@@ -557,12 +557,16 @@
       const endDateStr = `${formData.eYear}-${String(months.indexOf(formData.eMonth) + 1).padStart(2, '0')}-${String(formData.eDay).padStart(2, '0')}`;
 
 
+      // Build ISO datetimes including selected times so backend retains time information
+      const startDateISO = new Date(`${startDateStr}T${formData.startTime}:00`).toISOString();
+      const endDateISO = new Date(`${endDateStr}T${formData.endTime}:00`).toISOString();
+
       const payload = {
         title: formData.title,
         description: formData.description,
         location: formData.location,
-        event_date: startDateStr, // ✅ Use event_date for consistency
-        event_end_date: endDateStr, // ✅ Use event_end_date
+        event_date: startDateISO, // include time
+        event_end_date: endDateISO, // include time
         start_time: formData.startTime,
         end_time: formData.endTime,
         max_participants: Number(formData.totalSlots),

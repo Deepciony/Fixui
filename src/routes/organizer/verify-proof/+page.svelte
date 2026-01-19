@@ -4,6 +4,24 @@
   import { endpoints } from '../_lib/api/endpoints';
   import Swal from 'sweetalert2';
   
+
+  const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://158.108.102.14:8001").replace(/\/$/, "");
+
+  function getApiImageUrl(path: string): string {
+    if (!path) return "";
+    if (path.startsWith("http")) return path; // ถ้ามี http อยู่แล้วใช้ได้เลย
+    
+    // ลบ / ตัวหน้าออกถ้ามี
+    const cleanPath = path.startsWith('/') ? path.substring(1) : path;
+
+    // กรณี path มี uploads/ อยู่แล้ว (เช่น uploads/events/x.jpg) -> เติม /api/
+    if (cleanPath.startsWith('uploads/')) {
+        return `${API_BASE_URL}/api/${cleanPath}`;
+    }
+    
+    // กรณี path ไม่มี uploads/ (เช่น events/x.jpg) -> เติม /api/uploads/
+    return `${API_BASE_URL}/api/uploads/${cleanPath}`;
+  }
   // --- Language ---
   type Language = "th" | "en";
   let currentLang: Language = "th";
@@ -216,13 +234,20 @@
   // --- Functions ---
   
   function formatTimestamp(timestamp: string): string {
+    if (!timestamp) return "-";
     const date = new Date(timestamp);
+    
+    // เช็คว่าวันที่ถูกต้องหรือไม่
+    if (isNaN(date.getTime())) return "-";
+
+    // ✅ ใช้ format เดียวกับ Events (Day Month Year + Time)
     return date.toLocaleDateString(currentLang === "th" ? "th-TH" : "en-GB", {
       day: '2-digit',
       month: 'short',
       year: 'numeric',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
+      hour12: false
     });
   }
 
@@ -265,10 +290,9 @@
   
   // --- API Functions ---
 
-  async function loadEvents() {
+ async function loadEvents() {
     loading = true;
     try {
-      // ✅ 1. ดึง User ID จาก localStorage
       let userId = "";
       if (typeof localStorage !== 'undefined') {
         const userInfo = localStorage.getItem('user_info');
@@ -276,13 +300,10 @@
           try {
             const user = JSON.parse(userInfo);
             userId = user.id;
-          } catch (e) {
-            console.error("Error parsing user_info:", e);
-          }
+          } catch (e) { console.error("Error parsing user_info:", e); }
         }
       }
 
-      // ถ้าไม่มี ID ให้หยุดและแจ้งเตือน (หรือ Redirect)
       if (!userId) {
         console.error("User ID not found in localStorage");
         events = [];
@@ -290,33 +311,36 @@
         return;
       }
 
-      console.log(`🚀 Loading events for Organizer ID: ${userId}`);
-      
-      // ✅ ใช้ endpoint มาตรฐาน (ถ้าอยากใช้แบบ organizer เฉพาะ ให้เพิ่มใน endpoints)
       const response = await api.get(endpoints.events.list);
-      
+      console.log("Events Data:", response.data); 
+
       if (response.data && Array.isArray(response.data)) {
         events = response.data.map((e: any) => ({
           id: e.id,
           title: e.title,
           description: e.description,
           location: e.location,
-          startDate: e.start_date,
-          endDate: e.end_date,
-          startTime: e.start_time,
-          endTime: e.end_time,
-          status: e.status || "Active",
-          image: e.cover_image_url || e.image || e.banner_image_url || e.picture_url || "",
+          
+          // ✅ แก้ไขตรงนี้: เพิ่ม e.event_date และ e.event_end_date ตาม JSON ที่ให้มา
+          startDate: e.event_date || e.start_date || e.startDate || new Date().toISOString(),
+          endDate: e.event_end_date || e.end_date || e.endDate || new Date().toISOString(),
+          
+          startTime: e.start_time || e.startTime || "",
+          endTime: e.end_time || e.endTime || "",
+          
+          status: e.is_active ? "Active" : "Closed", // ปรับ Status ตาม JSON (is_active)
+          
+          // JSON มี banner_image_url เราก็ดึงมาใช้
+          image: getApiImageUrl(e.banner_image_url || e.cover_image_url || e.image || ""),
+          
           pendingCount: e.pending_proof_count || e.pending_count || 0,
-          organizer: e.organizer || null,
-          details: e.details || null,
-          tags: e.tags || [],
-          participants: e.participants || [],
-          maxParticipants: e.max_participants || e.maxParticipants || null,
-          eventType: e.event_type || e.type || null,
-          // เพิ่ม field อื่นๆที่ backend ส่งมาได้เลย
+          organizer: e.created_by || null,
+          details: null,
+          tags: [],
+          participants: [],
+          maxParticipants: e.max_participants || null,
+          eventType: e.event_type || null,
         }));
-        console.log('✅ loadEvents success, count:', events.length);
       } else {
         events = [];
       }
@@ -335,38 +359,53 @@
     await loadSubmissions(event.id);
   }
   
-  async function loadSubmissions(eventId: string) {
+ async function loadSubmissions(eventId: string) {
     loading = true;
     try {
-      // ✅ เปิดใช้งาน API loadSubmissions ปกติ (client.ts จะจัดการ token ให้)
-      const response = await api.get(`/api/participations/event/${eventId}`);
+      // ❌ ของเดิม (สาเหตุที่ Error 404):
+      // const response = await api.get(`/api/participations/event/${eventId}`);
+
+      // ✅ แก้ไข: เรียกใช้จาก endpoints.ts (ซึ่งเราแก้ให้ยิงไปที่ .../proofs แล้ว)
+      const response = await api.get(endpoints.participations.listByEvent(eventId));
       
+      console.log("Submissions Data:", response.data); 
+
       if (response.data && Array.isArray(response.data)) {
-          submissions = response.data.map((item: any) => ({
-            id: item.id,
-            runnerName: item.user?.display_name || "Unknown",
-            odySd: item.user?.student_id || "-",
-            email: item.user?.email || "-",
-            proofImage: item.proof_url,
-            status: item.status,
-            submittedAt: item.created_at,
-            updatedAt: item.updated_at || item.created_at,
-            stravaLink: item.strava_url,
-            actualDistance: parseFloat(item.distance || "0"),
-          }));
+          submissions = response.data.map((item: any) => {
+            const userObj = item.user || {}; 
+            
+            // ดึงวันที่จากหลาย field ที่เป็นไปได้
+            const rawDate = item.created_at || item.createdAt || item.timestamp || new Date().toISOString();
+
+            return {
+              id: item.id,
+              runnerName: userObj.display_name || item.runner_name || "Unknown",
+              odySd: userObj.student_id || item.student_id || "-",
+              email: userObj.email || item.email || "-",
+              
+              // ใช้ getApiImageUrl ที่เราสร้างไว้
+              proofImage: getApiImageUrl(item.proof_url || item.image_url || ""),
+              
+              status: item.status,
+              submittedAt: rawDate,
+              updatedAt: item.updated_at || item.updatedAt || rawDate,
+              stravaLink: item.strava_url || null,
+              actualDistance: parseFloat(item.distance || "0"),
+            };
+          });
       } else {
           submissions = [];
       }
       
+      // Filter วันที่
       const dates = [...new Set(submissions.map(s => s.submittedAt.split('T')[0]))];
       availableDates = dates.sort().reverse().map(d => ({
         value: d,
         display: new Date(d).toLocaleDateString(currentLang === "th" ? "th-TH" : "en-GB", {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric'
+          day: '2-digit', month: 'short', year: 'numeric'
         })
       }));
+
       calculateStatistics();
     } catch (error) {
       console.warn('Failed to load submissions:', error);
@@ -378,21 +417,24 @@
   }
   
   async function verifyParticipationAPI(
-    pid: string | number,
-    approved: boolean,
-    reason: string = ""
-  ) {
-    const payload: any = { participation_id: pid, approved };
-    if (!approved) payload.rejection_reason = reason;
+    pid: string | number,
+    approved: boolean,
+    reason: string = ""
+  ) {
+    const payload: any = { participation_id: pid, approved };
+    if (!approved) payload.rejection_reason = reason;
 
-    try {
-      // ✅ เปิดใช้งาน API verify
-      const res = await api.post("/api/participations/verify", payload);
-      return res.data;
-    } catch (err: any) {
-      throw new Error(err.response?.data?.message || "Verification failed");
-    }
-  }
+    try {
+      // ❌ ผิด:
+      // const res = await api.post("/api/participations/verify", payload);
+
+      // ✅ ถูกต้อง:
+      const res = await api.post(endpoints.participations.verify, payload);
+      return res.data;
+    } catch (err: any) {
+      throw new Error(err.response?.data?.message || "Verification failed");
+    }
+  }
   
   async function onApproveSubmission(sub: Submission) {
     const stravaInfo = sub.stravaLink
@@ -1076,8 +1118,8 @@
                 {/if}
 
                 <div class="submitted-time">
-                  Submitted: {formatTimestamp(sub.submittedAt)}
-                </div>
+  Submitted: {formatTimestamp(sub.submittedAt)}
+</div>
 
               </div>
             {/each}

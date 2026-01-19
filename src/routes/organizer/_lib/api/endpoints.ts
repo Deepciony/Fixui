@@ -9,11 +9,24 @@ export const endpoints = {
   },
   
   // Participants & Participations (แก้ไขให้ตรงกับ API จริง)
-  participations: {
-    listByEvent: (eventId: number | string) => `/api/participations/event/${eventId}`,
+ participations: {
+    // 1. [POST] ลงทะเบียนล่วงหน้า (Pre-register)
+    preRegister: (eventId: number | string) => `/api/participations/pre-register/${eventId}`,
+
+    // 2. [POST] เช็คอินรายวัน (Organizer สแกน)
+    checkInDaily: '/api/participations/check-in-daily',
+
+    // 3. Proofs (ดึงรายการหลักฐาน) - *ใช้ตัวเดิมที่แก้ไปแล้ว*
+    listByEvent: (eventId: number | string) => `/api/participations/event/${eventId}/proofs`,
+    
+    // สำหรับกดอนุมัติ/ปฏิเสธหลักฐาน (Organizer)
     verify: '/api/participations/verify',
-    checkIn: '/api/participants/check-in',
-    checkOut: '/api/participants/check-out',
+
+    // 4. [POST] ขอ Checkout Code (Participant กดขอ)
+    getCheckoutCode: (participationId: number | string) => `/api/participations/${participationId}/checkout-code`,
+
+    // 5. [POST] Checkout (Organizer สแกนเพื่อจบงาน)
+    checkout: (participationId: number | string) => `/api/participations/${participationId}/checkout`,
   },
   
   // Proof Submissions
@@ -26,8 +39,8 @@ export const endpoints = {
   // ✅ Logs (แก้ไขส่วนนี้)
   logs: {
     list: '/api/logs',
-    // ดึง Logs ทั้งหมดของกิจกรรม
-    getByEvent: (eventId: number | string) => `/api/events/${eventId}/logs`,
+    // ดึงรายการ participant history / snapshots ของกิจกรรม (ใช้ endpoint จริง)
+    getByEvent: (eventId: number | string) => `/api/events/${eventId}/participants/history`,
     // ดึง Logs เฉพาะบุคคล
     getByUser: (eventId: number | string, userId: number | string) => `/api/events/${eventId}/participants/${userId}/logs`,
     websocket: 'ws://localhost:3000/api/logs/stream',
@@ -52,8 +65,10 @@ export const endpoints = {
   // Users
   users: {
     unlock: '/api/users/unlock',
-    profile: '/api/users/profile',
-    updateProfile: '/api/users/profile',
+    profile: '/api/users/profile', // legacy/self
+    updateProfile: '/api/users/profile', // legacy/self
     changePassword: '/api/users/change-password',
+    getById: (userId: number | string) => `/api/users/${userId}`,
+    updateById: (userId: number | string) => `/api/users/${userId}`,
   }
 };

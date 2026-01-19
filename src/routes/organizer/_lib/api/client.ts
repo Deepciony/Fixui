@@ -2,7 +2,7 @@ import axios, { type AxiosError, type AxiosInstance } from 'axios';
 import Swal from 'sweetalert2';
 
 // กำหนด URL API
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://158.108.102.14:8001').replace(/\/$/, '');
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
 

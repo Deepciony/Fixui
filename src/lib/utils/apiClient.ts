@@ -275,3 +275,79 @@ export async function deleteParticipantSnapshot(
 
 // Export for use in +page.ts load functions
 export { apiRequest as fetch };
+
+// ===== Statistics / Status API =====
+
+export interface UserStatistics {
+    user_id: number;
+    total_participations: number;
+    total_check_ins: number;
+    total_completed: number;
+    total_distance_km?: number;
+    [key: string]: any;
+}
+
+export interface EventUserStatus {
+    user_id: number;
+    user_name: string;
+    status: string;
+    points?: number;
+    [key: string]: any;
+}
+
+export interface EventUsersResponse {
+    users: EventUserStatus[];
+    total?: number;
+}
+
+export interface EventSummaryResponse {
+    event_id: number;
+    total_participants: number;
+    total_check_ins: number;
+    total_completed: number;
+    [key: string]: any;
+}
+
+/**
+ * Get user statistics across all events
+ */
+export async function getUserStatistics(userId: number): Promise<UserStatistics> {
+    const response = await api.get(`/api/participations/user/${userId}/statistics`);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch user statistics: ${response.statusText}`);
+    }
+    return await response.json();
+}
+
+/**
+ * Get status for all users in an event (leaderboard / staff view)
+ */
+export async function getEventUsersStatus(eventId: number): Promise<EventUsersResponse> {
+    const response = await api.get(`/api/reward-leaderboards/events/${eventId}/users`);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch event users status: ${response.statusText}`);
+    }
+    return await response.json();
+}
+
+/**
+ * Get status for a single user in an event
+ */
+export async function getEventUserStatus(eventId: number, userId: number): Promise<EventUserStatus> {
+    const response = await api.get(`/api/reward-leaderboards/events/${eventId}/users/${userId}`);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch event user status: ${response.statusText}`);
+    }
+    return await response.json();
+}
+
+/**
+ * Get event summary statistics
+ */
+export async function getEventSummary(eventId: number): Promise<EventSummaryResponse> {
+    const response = await api.get(`/api/reward-leaderboards/events/${eventId}/summary`);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch event summary: ${response.statusText}`);
+    }
+    return await response.json();
+}
