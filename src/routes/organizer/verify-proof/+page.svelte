@@ -3,7 +3,7 @@
   import axios from 'axios';
   import Swal from 'sweetalert2';
   
-  // API Configuration
+  // --- API Configuration ---
   const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
   
   const api = axios.create({
@@ -12,12 +12,22 @@
   });
   
   api.interceptors.request.use((config) => {
-    const token = localStorage.getItem('access_token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+    if (typeof localStorage !== 'undefined') {
+      let token = localStorage.getItem('access_token');
+      if (token && typeof token === 'string') {
+        token = token.trim();
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+          if (import.meta.env.DEV) {
+            console.log('[verify-proof] Attach token:', token);
+          }
+        }
+      }
+    }
     return config;
   });
   
-  // Language
+  // --- Language ---
   type Language = "th" | "en";
   let currentLang: Language = "th";
   
@@ -49,11 +59,6 @@
       from: "จาก",
       to: "ถึง",
       selectDate: "เลือกวันที่",
-      confirmApprove: "ยืนยันการอนุมัติ",
-      confirmReject: "ยืนยันการปฏิเสธ",
-      approveSuccess: "อนุมัติสำเร็จ",
-      rejectSuccess: "ปฏิเสธสำเร็จ",
-      error: "เกิดข้อผิดพลาด",
       totalSubmissions: "ทั้งหมด",
       pendingReview: "รอตรวจสอบ",
       approvedToday: "อนุมัติวันนี้",
@@ -64,7 +69,6 @@
       results: "รายการ",
       status: "สถานะ",
       submittedAt: "ส่งเมื่อ",
-      actions: "การกระทำ",
       viewImage: "ดูรูปภาพ",
     },
     en: {
@@ -89,11 +93,6 @@
       from: "From",
       to: "To",
       selectDate: "Select date",
-      confirmApprove: "Confirm approval",
-      confirmReject: "Confirm rejection",
-      approveSuccess: "Approved successfully",
-      rejectSuccess: "Rejected successfully",
-      error: "Error occurred",
       totalSubmissions: "Total",
       pendingReview: "Pending",
       approvedToday: "Approved Today",
@@ -104,14 +103,13 @@
       results: "results",
       status: "Status",
       submittedAt: "Submitted At",
-      actions: "Actions",
       viewImage: "View Image",
     },
   };
   
   $: lang = translations[currentLang];
   
-  // Types
+  // --- Interfaces ---
   interface Event {
     id: string;
     title: string;
@@ -127,13 +125,16 @@
   }
   
   interface Submission {
-    id: string;
+    id: string | number;
     runnerName: string;
     odySd: string;
     email: string;
     proofImage: string;
     status: "Pending" | "Approved" | "Rejected";
     submittedAt: string;
+    updatedAt: string; // ใช้สำหรับคำนวณยอดวันนี้
+    stravaLink?: string;
+    actualDistance?: number;
   }
   
   interface Statistics {
@@ -143,29 +144,7 @@
     rejectedToday: number;
   }
   
-  // ==================== MOCK DATA (เพิ่มส่วนนี้) ====================
-  const MOCK_EVENTS: Event[] = [
-    {
-      id: "1", title: "KU Fun Run 2026", description: "วิ่งสนุกๆ รอบรั้วนนทรี", location: "Kasetsart University",
-      startDate: "2026-03-01", endDate: "2026-03-01", startTime: "05:00", endTime: "09:00",
-      status: "Active", image: "https://placehold.co/600x400/1e293b/10b981?text=KU+Run", pendingCount: 5
-    },
-    {
-      id: "2", title: "Engineering Run", description: "วิ่งเกียร์สัมพันธ์", location: "Engineering Faculty",
-      startDate: "2026-04-10", endDate: "2026-04-10", startTime: "06:00", endTime: "10:00",
-      status: "Closed", image: "https://placehold.co/600x400/1e293b/3b82f6?text=Eng+Run", pendingCount: 0
-    }
-  ];
-
-  const MOCK_SUBMISSIONS: Submission[] = [
-    { id: "s1", runnerName: "Somchai Jaidee", odySd: "6410501001", email: "somchai@ku.th", proofImage: "https://placehold.co/400x600/1e293b/10b981?text=Proof+1", status: "Pending", submittedAt: new Date().toISOString() },
-    { id: "s2", runnerName: "Suda Rakrean", odySd: "6510502055", email: "suda@ku.th", proofImage: "https://placehold.co/400x600/1e293b/3b82f6?text=Proof+2", status: "Pending", submittedAt: new Date(Date.now() - 3600000).toISOString() },
-    { id: "s3", runnerName: "Mana Manee", odySd: "6310503322", email: "mana@ku.th", proofImage: "https://placehold.co/400x600/1e293b/ef4444?text=Proof+3", status: "Approved", submittedAt: new Date(Date.now() - 7200000).toISOString() },
-    { id: "s4", runnerName: "Piti Pity", odySd: "6610504111", email: "piti@ku.th", proofImage: "https://placehold.co/400x600/1e293b/f59e0b?text=Proof+4", status: "Rejected", submittedAt: new Date(Date.now() - 86400000).toISOString() },
-    { id: "s5", runnerName: "Chujai Dee", odySd: "6410505999", email: "chujai@ku.th", proofImage: "https://placehold.co/400x600/1e293b/10b981?text=Proof+5", status: "Pending", submittedAt: new Date().toISOString() }
-  ];
-
-  // State
+  // --- State ---
   let view: 'events' | 'submissions' = 'events';
   let events: Event[] = [];
   let selectedEvent: Event | null = null;
@@ -181,7 +160,7 @@
   let searchQuery = "";
   let batchFilter = "";
   let stdIdFilter = "";
-  let statusFilter = "All";
+  let statusFilter = "Pending"; // Default to Pending for better UX
   let fromDate = "";
   let toDate = "";
   
@@ -216,7 +195,7 @@
     rejectedToday: 0
   };
   
-  // Computed
+  // --- Computed ---
   $: paginatedEvents = events.slice((eventsPage - 1) * eventsPerPage, eventsPage * eventsPerPage);
   $: totalEventsPages = Math.ceil(events.length / eventsPerPage);
   
@@ -266,18 +245,7 @@
   $: totalSubmissionsPages = Math.ceil(sortedSubmissions.length / submissionsPerPage);
   $: totalSubmissions = sortedSubmissions.length;
   
-  // Functions
-  function formatDateRange(event: Event, lang: Language): string {
-    const start = new Date(event.startDate);
-    const end = new Date(event.endDate);
-    const locale = lang === "th" ? "th-TH" : "en-GB";
-    const options: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short', year: 'numeric' };
-    
-    if (start.toDateString() === end.toDateString()) {
-      return start.toLocaleDateString(locale, options);
-    }
-    return `${start.toLocaleDateString(locale, options)} - ${end.toLocaleDateString(locale, options)}`;
-  }
+  // --- Functions ---
   
   function formatTimestamp(timestamp: string): string {
     const date = new Date(timestamp);
@@ -288,6 +256,19 @@
       hour: '2-digit',
       minute: '2-digit'
     });
+  }
+
+  function formatDateRange(event: Event, lang: Language): string {
+    if (!event.startDate) return "";
+    const start = new Date(event.startDate);
+    const end = new Date(event.endDate);
+    const locale = lang === "th" ? "th-TH" : "en-GB";
+    const options: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short', year: 'numeric' };
+    
+    if (start.toDateString() === end.toDateString()) {
+      return start.toLocaleDateString(locale, options);
+    }
+    return `${start.toLocaleDateString(locale, options)} - ${end.toLocaleDateString(locale, options)}`;
   }
   
   function translateStatus(status: string): string {
@@ -303,32 +284,56 @@
     statistics.total = submissions.length;
     statistics.pending = submissions.filter(s => s.status === "Pending").length;
     
+    // รีเซ็ตค่าทุกวันตามเวลาปัจจุบัน
     const today = new Date().toDateString();
+    
     statistics.approvedToday = submissions.filter(s => {
-      return s.status === "Approved" && new Date(s.submittedAt).toDateString() === today;
+      const actionDate = s.updatedAt ? new Date(s.updatedAt).toDateString() : new Date(s.submittedAt).toDateString();
+      return s.status === "Approved" && actionDate === today;
     }).length;
+    
     statistics.rejectedToday = submissions.filter(s => {
-      return s.status === "Rejected" && new Date(s.submittedAt).toDateString() === today;
+        const actionDate = s.updatedAt ? new Date(s.updatedAt).toDateString() : new Date(s.submittedAt).toDateString();
+      return s.status === "Rejected" && actionDate === today;
     }).length;
   }
   
+  // --- API Functions ---
+
   async function loadEvents() {
     loading = true;
     try {
-      // ลองเรียก API ก่อน
+      // ✅ เรียก API จริง
       const response = await api.get('/api/events');
-      if (response.data && response.data.length > 0) {
+      if (response.data && Array.isArray(response.data)) {
         events = response.data.map((e: any) => ({
-          ...e,
+          id: e.id,
+          title: e.title,
+          description: e.description,
+          location: e.location,
+          startDate: e.start_date,
+          endDate: e.end_date,
+          startTime: e.start_time,
+          endTime: e.end_time,
+          status: e.status || "Active",
+          image: e.cover_image_url || e.image || "",
           pendingCount: e.pending_proof_count || 0
         }));
       } else {
-        // ถ้าไม่มีข้อมูล ให้ใช้ Mockup
-        events = MOCK_EVENTS;
+        events = []; // Fallback
       }
     } catch (error) {
-      console.warn('Failed to load events, using mockup:', error);
-      events = MOCK_EVENTS;
+      // Handle 401 Unauthorized
+      if (error?.response?.status === 401) {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem('access_token');
+        }
+        // Redirect to login page (adjust path if needed)
+        window.location.href = '/auth/login';
+        return;
+      }
+      console.warn('API Load Error:', error);
+      events = [];
     } finally {
       loading = false;
     }
@@ -337,20 +342,31 @@
   async function selectEvent(event: Event) {
     selectedEvent = event;
     view = 'submissions';
+    statusFilter = "Pending"; // เมื่อเข้างาน ให้แสดง Pending ก่อน
     await loadSubmissions(event.id);
   }
   
   async function loadSubmissions(eventId: string) {
     loading = true;
     try {
-      const response = await api.get(`/api/events/${eventId}/proof-submissions`);
-      if (response.data && response.data.length > 0) {
-          submissions = response.data;
+      // ✅ เรียก API จริง (ดึงทั้งหมดเพื่อมา Filter ฝั่ง Client)
+      const response = await api.get(`/api/participations/event/${eventId}`);
+      if (response.data && Array.isArray(response.data)) {
+          submissions = response.data.map((item: any) => ({
+            id: item.id,
+            runnerName: item.user?.display_name || "Unknown",
+            odySd: item.user?.student_id || "-",
+            email: item.user?.email || "-",
+            proofImage: item.proof_url,
+            status: item.status, // "Pending", "Approved", "Rejected"
+            submittedAt: item.created_at,
+            updatedAt: item.updated_at || item.created_at, // ใช้สำหรับสถิติวันนี้
+            stravaLink: item.strava_url,
+            actualDistance: parseFloat(item.distance || "0"),
+          }));
       } else {
-          // ถ้าไม่มีข้อมูล ใช้ Mockup
-          submissions = MOCK_SUBMISSIONS;
+          submissions = [];
       }
-      
       // Extract available dates
       const dates = [...new Set(submissions.map(s => s.submittedAt.split('T')[0]))];
       availableDates = dates.sort().reverse().map(d => ({
@@ -361,14 +377,183 @@
           year: 'numeric'
         })
       }));
-      
       calculateStatistics();
     } catch (error) {
-      console.warn('Failed to load submissions, using mockup:', error);
-      submissions = MOCK_SUBMISSIONS;
+      // Handle 401 Unauthorized (เหมือน loadEvents)
+      if (error?.response?.status === 401) {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem('access_token');
+        }
+        window.location.href = '/auth/login';
+        return;
+      }
+      console.warn('Failed to load submissions:', error);
+      submissions = [];
       calculateStatistics();
     } finally {
       loading = false;
+    }
+  }
+  
+  async function verifyParticipationAPI(
+    pid: string | number,
+    approved: boolean,
+    reason: string = ""
+  ) {
+    const payload: any = { participation_id: pid, approved };
+    if (!approved) payload.rejection_reason = reason;
+
+    try {
+      console.log("🚀 Sending Payload:", payload);
+      // ✅ เรียก API Verify จริง
+      const res = await api.post("/api/participations/verify", payload);
+      return res.data;
+    } catch (err: any) {
+      throw new Error(err.response?.data?.message || "Verification failed");
+    }
+  }
+  
+  async function onApproveSubmission(sub: Submission) {
+    // ใช้ข้อมูลที่มีใน Submission หรือเว้นว่างไว้
+    const stravaInfo = sub.stravaLink
+      ? `<div class="info-row"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="flex-shrink: 0;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg><span>Strava: <a href="${sub.stravaLink}" target="_blank" style="color: #f97316;">${sub.stravaLink}</a></span></div>`
+      : "";
+    const distanceInfo = sub.actualDistance
+      ? `<div class="info-row"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="flex-shrink: 0;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path></svg><span>Distance: <b style="color: #10b981;">${sub.actualDistance} km</b></span></div>`
+      : "";
+
+    // HTML Structure ตามแม่แบบ
+    const htmlContent = `<div class="reject-container"><p class="helper-text">Are you sure you want to verify this proof?</p><div class="approve-card"><div class="ac-avatar"><span class="ac-placeholder">${sub.runnerName.charAt(0).toUpperCase()}</span></div><div class="card-content"><span class="rj-title">${sub.runnerName}</span><span class="rj-desc">Submitted: ${new Date(sub.submittedAt).toLocaleString(currentLang === "th" ? "th-TH" : "en-GB", { timeZone: "Asia/Bangkok" })}</span></div></div><div class="approve-info"><div class="info-row"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="flex-shrink: 0;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span>Status changes to <b>COMPLETED</b></span></div>${stravaInfo}${distanceInfo}<div class="info-row"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="flex-shrink: 0;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span>System auto-assigns rewards</span></div></div></div>`;
+
+    const styleContent = "<style>.reject-container { padding: 10px 0; text-align: left; }.helper-text { color: #94a3b8; font-size: 14px; margin-bottom: 20px; text-align: center; }.approve-card { display: flex; align-items: center; gap: 16px; background: rgba(16, 185, 129, 0.08); border: 2px solid rgba(16, 185, 129, 0.3); border-radius: 12px; padding: 16px; margin-bottom: 20px; }.ac-avatar { width: 56px; height: 56px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.3)); display: flex; align-items: center; justify-content: center; border: 2px solid rgba(16, 185, 129, 0.4); }.ac-placeholder { color: #10b981; font-size: 24px; font-weight: 700; text-transform: uppercase; }.card-content { flex: 1; display: flex; flex-direction: column; gap: 6px; }.rj-title { font-size: 16px; font-weight: 600; color: #f8fafc; }.rj-desc { font-size: 13px; color: #94a3b8; }.approve-info { background: rgba(30, 41, 59, 0.6); border: 2px solid rgba(71, 85, 105, 0.3); border-radius: 12px; padding: 16px; }.info-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; color: #cbd5e1; font-size: 14px; }.info-row svg { color: #10b981; }.info-row:not(:last-child) { border-bottom: 1px solid rgba(71, 85, 105, 0.2); }.info-row b { color: #10b981; font-weight: 600; }.swal-clean-popup-reject { background: #1e293b !important; border: 1px solid rgba(71, 85, 105, 0.3) !important; border-radius: 16px !important; padding: 24px !important; }.swal2-html-container { margin: 0 !important; }.swal2-validation-message { background: rgba(239, 68, 68, 0.1) !important; border: 2px solid rgba(239, 68, 68, 0.4) !important; border-radius: 12px !important; color: #fca5a5 !important; font-size: 14px !important; font-weight: 500 !important; padding: 12px 16px !important; margin: 16px 0 0 0 !important; display: none !important; align-items: center !important; gap: 8px !important; }@keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }@keyframes fadeOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-10px); } }.swal2-validation-message.show { display: flex !important; animation: slideDown 0.3s ease !important; }.swal2-validation-message.hide { animation: fadeOut 0.3s ease !important; }.swal2-validation-message::before { content: \"\"; display: inline-block; width: 20px; height: 20px; background: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23fca5a5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z'/%3E%3C/svg%3E\") no-repeat center; background-size: contain; flex-shrink: 0; }</style>";
+
+    Swal.fire({
+      title: '<span style="color: #10b981; font-size: 22px; font-weight: 600;">Approve Submission</span>',
+      html: htmlContent + styleContent,
+      showCancelButton: true,
+      confirmButtonColor: "#10b981",
+      cancelButtonColor: "#475569",
+      confirmButtonText: '<span style="font-weight: 600;">Yes, Approve</span>',
+      cancelButtonText: "Cancel",
+      customClass: {
+        popup: "swal-clean-popup-reject",
+        confirmButton: "swal-btn-approve",
+        cancelButton: "swal-btn-cancel",
+      },
+      width: "540px",
+      preConfirm: async () => {
+        try {
+          // ✅ เชื่อมต่อ API
+          const result = await verifyParticipationAPI(sub.id, true);
+          return result;
+        } catch (e: any) {
+          const errorMessage = e.message || "Verification failed";
+          Swal.showValidationMessage(errorMessage);
+          return false;
+        }
+      },
+    }).then((res) => {
+      if (res.isConfirmed) {
+        // ✅ อัปเดต UI ทันที: ลบการ์ดออก และ เพิ่มสถิติอนุมัติ
+        // ใช้ filter เพื่อเอา ID ที่ตรงกันออก (Convert to string to be safe)
+        submissions = submissions.filter((s) => String(s.id) !== String(sub.id));
+        
+        // Update stats locally to reflect immediate change
+        statistics.total--;
+        statistics.pending--;
+        statistics.approvedToday++;
+        
+        Swal.fire({
+          title: '<span style="color: #10b981; font-weight: 600;">Verified!</span>',
+          html: '<p style="color: #94a3b8; font-size: 14px;">Participation has been approved successfully.</p>',
+          icon: "success",
+          timer: 2000,
+          showConfirmButton: false,
+          customClass: { popup: "swal-clean-popup-reject" },
+          background: "#1e293b",
+          iconColor: "#10b981",
+        });
+      }
+    });
+  }
+  
+  async function onRejectSubmission(sub: Submission) {
+    const htmlContent =
+      '<div class="reject-container"><p class="helper-text">Please select a reason for rejection:</p><label class="reject-card"><input type="radio" name="rj_reason" value="Unclear image / Unreadable" checked><div class="card-content"><div class="icon-wrapper unclear"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg></div><div class="text-wrapper"><span class="rj-title">Unclear Image</span><span class="rj-desc">Photo is blurry, dark, or data is unreadable.</span></div></div></label><label class="reject-card"><input type="radio" name="rj_reason" value="Incorrect distance or duration"><div class="card-content"><div class="icon-wrapper incorrect"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div><div class="text-wrapper"><span class="rj-title">Incorrect Data</span><span class="rj-desc">Distance or time does not match requirements.</span></div></div></label><label class="reject-card"><input type="radio" name="rj_reason" value="Duplicate submission"><div class="card-content"><div class="icon-wrapper duplicate"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></div><div class="text-wrapper"><span class="rj-title">Duplicate</span><span class="rj-desc">This proof has already been submitted.</span></div></div></label><label class="reject-card"><input type="radio" name="rj_reason" value="other"><div class="card-content"><div class="icon-wrapper other"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></div><div class="text-wrapper"><span class="rj-title">Other Reason</span><span class="rj-desc">Specify a custom reason below.</span></div></div></label><div id="other-input-container" class="other-box"><textarea id="other-reason-text" class="custom-textarea" placeholder="Please type the reason here..." rows="4"></textarea></div></div>';
+
+    const styleContent =
+      '<style>.reject-container { padding: 10px 0; text-align: left; }.helper-text { color: #94a3b8; font-size: 14px; margin-bottom: 16px; text-align: center; }.reject-card { display: block; background: rgba(30, 41, 59, 0.6); border: 2px solid rgba(71, 85, 105, 0.3); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s ease; position: relative; }.reject-card:hover { background: rgba(30, 41, 59, 0.8); border-color: rgba(239, 68, 68, 0.4); transform: translateX(4px); }.reject-card input[type="radio"] { position: absolute; opacity: 0; width: 0; height: 0; }.reject-card input[type="radio"]:checked ~ .card-content { opacity: 1; }.reject-card input[type="radio"]:checked ~ .card-content .icon-wrapper { background: rgba(239, 68, 68, 0.15); border-color: #ef4444; }.reject-card input[type="radio"]:checked ~ .card-content .rj-title { color: #f87171; }.reject-card:has(input[type="radio"]:checked) { background: rgba(239, 68, 68, 0.08); border-color: #ef4444; }.card-content { display: flex; align-items: center; gap: 14px; opacity: 0.7; transition: opacity 0.2s; }.icon-wrapper { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 2px solid transparent; transition: all 0.2s; }.icon-wrapper.unclear { background: rgba(251, 191, 36, 0.1); color: #fbbf24; }.icon-wrapper.incorrect { background: rgba(239, 68, 68, 0.1); color: #ef4444; }.icon-wrapper.duplicate { background: rgba(168, 85, 247, 0.1); color: #a855f7; }.icon-wrapper.other { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }.text-wrapper { flex: 1; display: flex; flex-direction: column; gap: 4px; }.rj-title { font-size: 15px; font-weight: 600; color: #f8fafc; transition: color 0.2s; }.rj-desc { font-size: 13px; color: #94a3b8; line-height: 1.4; }.other-box { max-height: 0; overflow: hidden; opacity: 0; transition: all 0.3s ease; margin-top: 0; width: 100%; box-sizing: border-box; }.other-box.visible { max-height: 200px; opacity: 1; margin-top: 12px; }.custom-textarea { width: 100%; box-sizing: border-box; background: rgba(15, 23, 42, 0.8); border: 2px solid rgba(71, 85, 105, 0.4); border-radius: 12px; padding: 12px 14px; color: #f8fafc; font-size: 14px; font-family: inherit; resize: vertical; min-height: 100px; transition: all 0.2s; }.custom-textarea:focus { outline: none; border-color: #ef4444; background: rgba(15, 23, 42, 0.95); }.custom-textarea::placeholder { color: #64748b; }.swal-clean-popup-reject { background: #1e293b !important; border: 1px solid rgba(71, 85, 105, 0.3) !important; border-radius: 16px !important; padding: 24px !important; }.swal2-html-container { margin: 0 !important; }</style>';
+
+    const result = await Swal.fire({
+      title: '<span style="color: #f87171; font-size: 22px; font-weight: 600;">Reject Submission</span>',
+      html: htmlContent + styleContent,
+      showCancelButton: true,
+      confirmButtonColor: "#ef4444",
+      cancelButtonColor: "#475569",
+      confirmButtonText: '<span style="font-weight: 600;">Confirm Reject</span>',
+      cancelButtonText: "Cancel",
+      customClass: {
+        popup: "swal-clean-popup-reject",
+        confirmButton: "swal-btn-reject",
+        cancelButton: "swal-btn-cancel",
+      },
+      width: "540px",
+      didOpen: () => {
+        const radios = document.querySelectorAll('input[name="rj_reason"]');
+        const otherContainer = document.getElementById("other-input-container");
+        const textArea = document.getElementById("other-reason-text") as HTMLTextAreaElement;
+
+        radios.forEach((radio) => {
+          radio.addEventListener("change", (e: any) => {
+            if (e.target.value === "other") {
+              otherContainer!.classList.add("visible");
+              setTimeout(() => textArea?.focus(), 100);
+            } else {
+              otherContainer!.classList.remove("visible");
+              textArea.value = "";
+            }
+          });
+        });
+      },
+      preConfirm: () => {
+        const selected = document.querySelector('input[name="rj_reason"]:checked') as HTMLInputElement;
+        if (!selected) return Swal.showValidationMessage("Please select a reason");
+
+        let finalReason = selected.value;
+        if (finalReason === "other") {
+          const textVal = (document.getElementById("other-reason-text") as HTMLTextAreaElement).value.trim();
+          if (!textVal) return Swal.showValidationMessage("Please specify the reason.");
+          finalReason = textVal;
+        }
+
+        // ✅ เชื่อมต่อ API
+        return verifyParticipationAPI(sub.id, false, finalReason).catch(
+          (error) => {
+            Swal.showValidationMessage(`Error: ${error.message}`);
+          }
+        );
+      },
+    });
+
+    if (result.value) {
+      // ✅ อัปเดต UI ทันที
+      submissions = submissions.filter((s) => String(s.id) !== String(sub.id));
+      
+      // Update stats locally
+      statistics.total--;
+      statistics.pending--;
+      statistics.rejectedToday++;
+
+      Swal.fire({
+        title: '<span style="color: #f87171; font-weight: 600;">Rejected!</span>',
+        html: '<p style="color: #94a3b8; font-size: 14px;">The submission has been rejected successfully.</p>',
+        icon: "success",
+        timer: 2000,
+        showConfirmButton: false,
+        customClass: { popup: "swal-clean-popup-reject" },
+        background: "#1e293b",
+        iconColor: "#ef4444",
+      });
     }
   }
   
@@ -388,105 +573,7 @@
     toDate = "";
     submissionsPage = 1;
   }
-  
-  async function onApproveSubmission(sub: Submission) {
-    const result = await Swal.fire({
-      title: lang.confirmApprove,
-      text: `${sub.runnerName} (${sub.odySd})`,
-      icon: 'question',
-      showCancelButton: true,
-      confirmButtonColor: '#10b981',
-      cancelButtonColor: '#64748b',
-      confirmButtonText: lang.approve,
-      cancelButtonText: 'Cancel',
-      background: '#1e293b',
-      color: '#fff',
-    });
-    
-    if (result.isConfirmed) {
-      try {
-        await api.post(`/api/proof-submissions/${sub.id}/approve`);
-        
-        await Swal.fire({
-          title: lang.approveSuccess,
-          icon: 'success',
-          background: '#1e293b',
-          color: '#fff',
-          confirmButtonColor: '#10b981',
-          timer: 1500,
-          showConfirmButton: false
-        });
-        
-        if (selectedEvent) {
-          await loadSubmissions(selectedEvent.id);
-        }
-      } catch (error) {
-        // Mock success action
-        sub.status = "Approved";
-        submissions = [...submissions]; // Trigger update
-        calculateStatistics();
-        Swal.fire({
-          title: lang.approveSuccess + " (Mock)",
-          icon: 'success',
-          background: '#1e293b',
-          color: '#fff',
-          confirmButtonColor: '#10b981',
-          timer: 1500,
-          showConfirmButton: false
-        });
-      }
-    }
-  }
-  
-  async function onRejectSubmission(sub: Submission) {
-    const result = await Swal.fire({
-      title: lang.confirmReject,
-      text: `${sub.runnerName} (${sub.odySd})`,
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonColor: '#ef4444',
-      cancelButtonColor: '#64748b',
-      confirmButtonText: lang.reject,
-      cancelButtonText: 'Cancel',
-      background: '#1e293b',
-      color: '#fff',
-    });
-    
-    if (result.isConfirmed) {
-      try {
-        await api.post(`/api/proof-submissions/${sub.id}/reject`);
-        
-        await Swal.fire({
-          title: lang.rejectSuccess,
-          icon: 'success',
-          background: '#1e293b',
-          color: '#fff',
-          confirmButtonColor: '#10b981',
-          timer: 1500,
-          showConfirmButton: false
-        });
-        
-        if (selectedEvent) {
-          await loadSubmissions(selectedEvent.id);
-        }
-      } catch (error) {
-        // Mock success action
-        sub.status = "Rejected";
-        submissions = [...submissions]; // Trigger update
-        calculateStatistics();
-        Swal.fire({
-          title: lang.rejectSuccess + " (Mock)",
-          icon: 'success',
-          background: '#1e293b',
-          color: '#fff',
-          confirmButtonColor: '#10b981',
-          timer: 1500,
-          showConfirmButton: false
-        });
-      }
-    }
-  }
-  
+
   function onProofImageClick(imageUrl: string) {
     modalImageUrl = imageUrl;
     showImageModal = true;
@@ -551,8 +638,25 @@
     showSubmissionsPageDropdown = false;
   }
   
-  onMount(() => {
-    loadEvents();
+  onMount(async () => {
+    // Pre-check for access_token before loading events
+    if (typeof localStorage !== 'undefined') {
+      const token = localStorage.getItem('access_token');
+      if (!token || token.trim() === '') {
+        console.warn('[Auth] No token found, redirecting to login');
+        window.location.href = '/auth/login';
+        return;
+      }
+      console.log('[Auth] Token found:', token.substring(0, 20) + '...');
+    }
+    
+    // Try to load events and handle auth errors
+    try {
+      await loadEvents();
+    } catch (error) {
+      console.error('[Auth] Failed to load events:', error);
+      // If loadEvents fails, it will handle the redirect internally
+    }
   });
   
   onDestroy(() => {
@@ -933,27 +1037,33 @@
           </div>
         {:else}
           <div class="submissions-grid">
-            {#each paginatedSubmissions as sub, index (sub.id)}
-              {@const globalIndex = (submissionsPage - 1) * submissionsPerPage + index}
+            {#each paginatedSubmissions as sub (sub.id)}
               <div class="submission-card">
-                <div class="rank-badge">#{globalIndex + 1}</div>
                 
-                <div class="user-details">
-                  <h4 class="user-name">{sub.runnerName}</h4>
-                  <p class="user-meta">
-                    <span class="nisit-id">{sub.odySd}</span>
-                    <span class="separator">•</span>
-                    <span class="user-email">{sub.email}</span>
-                  </p>
-                  <div class="submission-info">
-                    <span class="status-badge" class:pending={sub.status === "Pending"} class:approved={sub.status === "Approved"} class:rejected={sub.status === "Rejected"}>
-                      {sub.status}
-                    </span>
-                    <span class="submitted-time">{formatTimestamp(sub.submittedAt)}</span>
+                <div class="card-header">
+                  <div class="user-info">
+                    <h4 class="user-name">{sub.runnerName}</h4>
+                    <div class="user-meta">
+                      <span class="nisit-id">{sub.odySd}</span>
+                      <span class="separator">•</span>
+                      <span class="user-email">{sub.email}</span>
+                    </div>
                   </div>
+                  <span class="status-badge" 
+                    class:pending={sub.status === "Pending"} 
+                    class:approved={sub.status === "Approved"} 
+                    class:rejected={sub.status === "Rejected"}
+                  >
+                    {sub.status}
+                  </span>
                 </div>
                 
-                <div class="proof-image-box" role="button" tabindex="0" on:click={() => onProofImageClick(sub.proofImage)} on:keydown={(e) => { if (e.key === "Enter" || e.key === " ") onProofImageClick(sub.proofImage); }}>
+                <div class="proof-image-box" 
+                    role="button" 
+                    tabindex="0" 
+                    on:click={() => onProofImageClick(sub.proofImage)} 
+                    on:keydown={(e) => { if (e.key === "Enter" || e.key === " ") onProofImageClick(sub.proofImage); }}
+                >
                   {#if sub.proofImage}
                     <img src={sub.proofImage} alt="Proof" />
                     <div class="image-overlay">
@@ -985,6 +1095,11 @@
                     </button>
                   </div>
                 {/if}
+
+                <div class="submitted-time">
+                  Submitted: {formatTimestamp(sub.submittedAt)}
+                </div>
+
               </div>
             {/each}
           </div>
@@ -1676,6 +1791,7 @@
     margin-bottom: 2rem;
   }
 
+  /* Card Style (Glassmorphism) */
   .submission-card {
     position: relative;
     background: rgba(30, 41, 59, 0.6);
@@ -1686,49 +1802,48 @@
     display: flex;
     flex-direction: column;
     gap: 1rem;
-    transition: all 0.3s;
+    transition: all 0.3s ease;
   }
 
   .submission-card:hover {
     border-color: rgba(16, 185, 129, 0.3);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    transform: translateY(-4px);
   }
 
-  .rank-badge {
-    position: absolute;
-    top: 1rem;
-    left: 1rem;
-    width: 36px;
-    height: 36px;
-    background: linear-gradient(135deg, #10b981, #059669);
-    border-radius: 50%;
+  /* Header Layout */
+  .card-header {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-weight: 700;
-    font-size: 0.875rem;
-    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
   }
 
-  .user-details {
-    padding-top: 1.5rem;
+  .user-info {
+    flex: 1;
+    min-width: 0; /* ป้องกัน text overflow */
   }
 
   .user-name {
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 0.25rem 0;
     font-size: 1.125rem;
     font-weight: 700;
     color: #f8fafc;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: left; /* ✅ ชิดซ้าย */
   }
 
+  /* Meta Info: ID + Email */
   .user-meta {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.5rem;
     color: #94a3b8;
     font-size: 0.875rem;
-    margin: 0 0 0.75rem 0;
+    line-height: 1.4;
   }
 
   .nisit-id {
@@ -1741,44 +1856,44 @@
     color: #475569;
   }
 
-  .submission-info {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    flex-wrap: wrap;
+  .user-email {
+    color: #64748b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
+  /* Status Badge (Top Right) */
   .status-badge {
+    flex-shrink: 0;
     display: inline-flex;
     padding: 0.375rem 0.75rem;
     border-radius: 12px;
-    font-size: 0.8rem;
-    font-weight: 600;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
 
   .status-badge.pending {
-    background: rgba(245, 158, 11, 0.2);
+    background: rgba(245, 158, 11, 0.15);
     border: 1px solid rgba(245, 158, 11, 0.3);
-    color: #f59e0b;
+    color: #fbbf24;
   }
 
   .status-badge.approved {
-    background: rgba(16, 185, 129, 0.2);
+    background: rgba(16, 185, 129, 0.15);
     border: 1px solid rgba(16, 185, 129, 0.3);
-    color: #10b981;
+    color: #34d399;
   }
 
   .status-badge.rejected {
-    background: rgba(239, 68, 68, 0.2);
+    background: rgba(239, 68, 68, 0.15);
     border: 1px solid rgba(239, 68, 68, 0.3);
-    color: #ef4444;
+    color: #f87171;
   }
 
-  .submitted-time {
-    color: #64748b;
-    font-size: 0.85rem;
-  }
-
+  /* Image Box */
   .proof-image-box {
     width: 100%;
     height: 200px;
@@ -1787,13 +1902,14 @@
     overflow: hidden;
     position: relative;
     cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.05);
   }
 
   .proof-image-box img {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 0.3s;
+    transition: transform 0.5s ease;
   }
 
   .proof-image-box:hover img {
@@ -1803,14 +1919,15 @@
   .image-overlay {
     position: absolute;
     inset: 0;
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(2px);
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
     opacity: 0;
-    transition: opacity 0.3s;
+    transition: all 0.3s ease;
     color: white;
   }
 
@@ -1828,46 +1945,57 @@
     font-size: 0.875rem;
   }
 
+  /* Actions */
   .card-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 0.75rem;
+    gap: 12px;
+    margin-top: 4px;
   }
 
-  .btn-reject, .btn-approve {
-    padding: 0.875rem 1.25rem;
-    border: none;
-    border-radius: 12px;
-    font-weight: 700;
-    font-size: 0.95rem;
-    cursor: pointer;
-    transition: all 0.3s;
+  .btn-approve, .btn-reject {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
-  }
-
-  .btn-reject {
-    background: rgba(239, 68, 68, 0.2);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    color: #ef4444;
-  }
-
-  .btn-reject:hover {
-    background: rgba(239, 68, 68, 0.3);
-    transform: translateY(-2px);
+    gap: 8px;
+    padding: 10px;
+    border-radius: 10px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: none;
   }
 
   .btn-approve {
-    background: linear-gradient(135deg, #10b981, #059669);
+    background: #10b981;
     color: white;
-    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.2);
+  }
+  .btn-approve:hover {
+    background: #059669;
+    box-shadow: 0 6px 8px -1px rgba(16, 185, 129, 0.3);
+    transform: translateY(-1px);
   }
 
-  .btn-approve:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(16, 185, 129, 0.4);
+  .btn-reject {
+    background: transparent;
+    border: 1px solid rgba(239, 68, 68, 0.5);
+    color: #f87171;
+  }
+  .btn-reject:hover {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: #ef4444;
+    color: #ef4444;
+  }
+
+  /* Submitted Time (Bottom) */
+  .submitted-time {
+    color: #64748b;
+    font-size: 0.75rem;
+    text-align: center;
+    margin-top: auto; /* ดันลงล่างสุดถ้า Flex container สูง */
+    padding-top: 0.5rem;
   }
 
   /* ==================== PAGINATION ==================== */

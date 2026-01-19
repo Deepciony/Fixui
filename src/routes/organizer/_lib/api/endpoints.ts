@@ -8,10 +8,10 @@ export const endpoints = {
     delete: (id: number | string) => `/api/events/${id}`,
   },
   
-  // Participants
-  participants: {
-    list: (eventId: number | string) => `/api/events/${eventId}/participants`,
-    verify: '/api/participants/verify',
+  // Participants & Participations (แก้ไขให้ตรงกับ API จริง)
+  participations: {
+    listByEvent: (eventId: number | string) => `/api/participations/event/${eventId}`,
+    verify: '/api/participations/verify',
     checkIn: '/api/participants/check-in',
     checkOut: '/api/participants/check-out',
   },
