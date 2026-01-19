@@ -9,7 +9,7 @@ export const endpoints = {
   },
   
   // Participants & Participations (แก้ไขให้ตรงกับ API จริง)
- participations: {
+  participations: {
     // 1. [POST] ลงทะเบียนล่วงหน้า (Pre-register)
     preRegister: (eventId: number | string) => `/api/participations/pre-register/${eventId}`,
 
@@ -40,23 +40,33 @@ export const endpoints = {
     reject: (proofId: number | string) => `/api/proofs/${proofId}/reject`,
   },
   
-  // ✅ Logs (แก้ไขส่วนนี้)
+  // ✅ Logs
   logs: {
     list: '/api/logs',
-    // ดึงรายการ participant history / snapshots ของกิจกรรม (ใช้ endpoint จริง)
+    // ดึงรายการ participant history / snapshots ของกิจกรรม
     getByEvent: (eventId: number | string) => `/api/events/${eventId}/participants/history`,
     // ดึง Logs เฉพาะบุคคล
     getByUser: (eventId: number | string, userId: number | string) => `/api/events/${eventId}/participants/${userId}/logs`,
     websocket: 'ws://localhost:3000/api/logs/stream',
   },
   
-  // Rewards
+  // ✅ Rewards (เพิ่มส่วนที่ขาดหายไป)
   rewards: {
     leaderboard: (eventId: number | string) => `/api/reward-leaderboards/events/${eventId}/users`,
     config: (eventId: number | string) => `/api/reward-leaderboards/configs/event/${eventId}`,
     entries: (configId: number | string) => `/api/reward-leaderboards/configs/${configId}/entries`,
     finalize: (configId: number | string) => `/api/reward-leaderboards/configs/${configId}/finalize`,
     sendMessage: '/api/rewards/send-message',
+    
+    // [เพิ่มใหม่] สำหรับคำนวณอันดับก่อน Finalize (Preview)
+    preview: (configId: number | string) => `/api/reward-leaderboards/configs/${configId}/calculate-ranks`,
+    
+    // [เพิ่มใหม่] สำหรับสร้าง Reward และ Config (ใช้ตอน Create Event)
+    createConfig: '/api/reward-leaderboards/configs',
+    createReward: '/api/rewards',
+    
+    // [เพิ่มใหม่] สำหรับดู Reward ของ User รายคน
+    getByUser: (userId: number | string) => `/api/rewards/user/${userId}`,
   },
   
   // Auth

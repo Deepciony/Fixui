@@ -523,7 +523,7 @@
         // ใช้ endpoint calculate-ranks
         // POST /api/reward-leaderboards/configs/{config_id}/calculate-ranks
         // หมายเหตุ: ใน endpoints.ts ไม่ได้ระบุ calculate-ranks ชัดเจน อาจจะต้องเพิ่ม หรือใช้ path manual
-        const url = `/api/reward-leaderboards/configs/${rewardConfig.id}/calculate-ranks`;
+        const url = endpoints.rewards.preview(rewardConfig.id);
         const res = await api.post(url);
         
         // Response น่าจะคืนค่า stats หรือ entries ที่อัปเดตแล้ว

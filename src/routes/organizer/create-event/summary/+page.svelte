@@ -4,11 +4,13 @@
   import { appState } from '../../_lib/stores/appState';
   import { t } from '../../_lib/i18n';
   import { onMount } from 'svelte';
-  
+  // ✅ 1. Import endpoints เพื่อใช้ URL ที่ถูกต้อง
+  import { endpoints } from '../../_lib/api/endpoints';
+
   $: lang = $appState.currentLang;
   $: storeData = $eventForm as any;
   $: editingEventId = storeData?.editingEventId;
-  
+
   let formData = {
     imagePreview: null as string | null,
     title: '',
@@ -33,23 +35,23 @@
     isPublic: true,
     isActive: true
   };
-  
+
   let isSubmitting = false;
   let error = '';
-  
+
   onMount(() => {
     formData = { ...$eventForm } as any;
   });
-  
+
   function formatDate(day: string, month: string, year: string) {
     if (!day || !month || !year) return '';
-    const monthNames = lang === 'th' 
+    const monthNames = lang === 'th'
       ? ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
       : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const monthIndex = parseInt(month) - 1;
     return `${day} ${monthNames[monthIndex]} ${year}`;
   }
-  
+
   function getEventTypeLabel(type: string) {
     const types: Record<string, { th: string; en: string }> = {
       single_day: { th: 'กิจกรรมวันเดียว', en: 'Single Day Event' },
@@ -57,7 +59,7 @@
     };
     return types[type]?.[lang] || type;
   }
-  
+
   function getHolidayModeLabel(mode: string | null) {
     if (!mode) return lang === 'th' ? 'ไม่มี' : 'None';
     const modes: Record<string, { th: string; en: string }> = {
@@ -67,17 +69,20 @@
     };
     return modes[mode]?.[lang] || mode;
   }
-  
+
+  // ✅ 2. แก้ไข Logic การ Submit ให้แยก Event และ Rewards
   async function handleSubmit() {
     isSubmitting = true;
     error = '';
-    
+    console.log("🚀 Starting handleSubmit..."); // [Log จุดเริ่มต้น]
+
     try {
-      // Create FormData for file uploads
+      // --- STEP 1: Submit Event Data ---
+      console.log("📦 Step 1: Preparing Event Data..."); // [Log ขั้นตอน]
       const formDataToSend = new FormData();
-      
-      // Add all fields
+
       Object.entries(formData).forEach(([key, value]) => {
+        if (key === 'rewards' || key === 'totalRewards') return;
         if (value !== null && value !== undefined) {
           if (Array.isArray(value)) {
             formDataToSend.append(key, JSON.stringify(value));
@@ -88,22 +93,96 @@
           }
         }
       });
+
+      // เช็คว่า URL ถูกต้องไหม
+      const eventUrl = editingEventId 
+        ? endpoints.events.update(editingEventId)
+        : endpoints.events.create;
       
-      // Submit to API
-      const response = await fetch('/api/organizer/events', {
+      console.log("🔗 Event API URL:", eventUrl); // [Log URL]
+
+      // ยิง API
+      const response = await fetch(eventUrl, {
         method: editingEventId ? 'PUT' : 'POST',
-        body: formDataToSend
+        body: formDataToSend,
+        headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token') || ''}`
+        }
       });
-      
+
+      console.log("📡 Event API Status:", response.status); // [Log สถานะตอบกลับ]
+
       if (!response.ok) {
-        throw new Error('Failed to submit event');
+        const errData = await response.json().catch(() => ({}));
+        console.error("❌ Event Creation Failed:", errData); // [Log Error]
+        throw new Error(errData.detail || errData.message || 'Failed to submit event');
+      }
+
+      const eventResult = await response.json();
+      const eventId = eventResult.id || eventResult.data?.id || editingEventId;
+      
+      console.log("✅ Event Created Successfully! ID:", eventId); // [Log สำคัญ: ได้ ID มาไหม]
+
+      // --- STEP 2: Create Reward Config ---
+      if (eventId && formData.rewards && formData.rewards.length > 0) {
+          console.log("🎁 Step 2: Creating Rewards for Event ID:", eventId); // [Log เริ่มสร้าง Reward]
+          
+          let endsAtStr = new Date().toISOString();
+          if (formData.eYear && formData.eMonth && formData.eDay && formData.endTime) {
+              const y = formData.eYear;
+              const m = formData.eMonth.toString().padStart(2, '0');
+              const d = formData.eDay.toString().padStart(2, '0');
+              const time = formData.endTime;
+              endsAtStr = `${y}-${m}-${d}T${time}:00`;
+          }
+
+          const configPayload = {
+              event_id: eventId,
+              name: "Default Leaderboard",
+              description: "Generated from event creation",
+              max_reward_recipients: Number(formData.totalRewards) || 0,
+              required_completions: 1, 
+              starts_at: new Date().toISOString(),
+              ends_at: new Date(endsAtStr).toISOString(),
+              reward_tiers: formData.rewards.map((r, index) => ({
+                  tier: index + 1,
+                  reward_name: r.name,
+                  required_completions: Number(r.requirement),
+                  quantity: 0,
+                  min_rank: 0,
+                  max_rank: 0
+              }))
+          };
+
+          console.log("📤 Reward Config Payload:", configPayload); // [Log ดูข้อมูลที่จะส่งไป]
+
+          const rewardRes = await fetch(endpoints.rewards.createConfig, {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${localStorage.getItem('access_token') || ''}`
+              },
+              body: JSON.stringify(configPayload)
+          });
+
+          console.log("📡 Reward API Status:", rewardRes.status); // [Log ผลลัพธ์ Reward API]
+
+          if (!rewardRes.ok) {
+              const rewardErr = await rewardRes.json().catch(() => ({}));
+              console.warn('⚠️ Failed to create reward config:', rewardErr); // [Log เตือนถ้าสร้าง Reward ไม่ผ่าน]
+          } else {
+              console.log("✅ Reward Config Created Successfully");
+          }
+      } else {
+          console.log("ℹ️ No rewards to create or missing Event ID");
       }
       
-      // Success - redirect to events list
+      console.log("🏁 Process Complete. Redirecting...");
       eventForm.reset();
       goto('/organizer/events');
       
     } catch (err: any) {
+      console.error("💥 Critical Error in handleSubmit:", err); // [Log Error ใหญ่สุด]
       error = err.message || 'An error occurred';
       isSubmitting = false;
     }
@@ -112,14 +191,13 @@
   function handleBack() {
     goto('/organizer/create-event/rewards');
   }
-  
+
   function handleEdit(section: string) {
     goto(`/organizer/create-event/${section}`);
   }
 </script>
 
 <div class="ce-grid-layout">
-  <!-- Summary Header -->
   <div class="ce-summary-header">
     <div class="ce-summary-icon">
       <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -132,7 +210,6 @@
     </div>
   </div>
 
-  <!-- General Info Card -->
   <div class="ce-card ce-summary-card">
     <div class="ce-card-head">
       <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
@@ -185,7 +262,6 @@
     </div>
   </div>
 
-  <!-- Date & Capacity Card -->
   <div class="ce-card ce-summary-card">
     <div class="ce-card-head">
       <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
@@ -240,7 +316,6 @@
     </div>
   </div>
 
-  <!-- Rewards Card -->
   <div class="ce-card ce-summary-card">
     <div class="ce-card-head">
       <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
@@ -281,14 +356,12 @@
     {/if}
   </div>
 
-  <!-- Error Display -->
   {#if error}
     <div class="ce-error-msg">
       ⚠️ {error}
     </div>
   {/if}
 
-  <!-- Navigation Buttons -->
   <div class="ce-nav-buttons">
     <button type="button" class="ce-btn-cancel" on:click={handleBack} disabled={isSubmitting}>
       <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
