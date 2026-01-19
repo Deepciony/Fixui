@@ -105,6 +105,10 @@
   let lastParticipantName = "";
   let verifyErrorMessage = "";
   let verifyErrorIndex: number | null = null;
+  let eventsList: Array<any> = [];
+  let selectedEventId: number | null = null;
+  let dropdownOpen = false;
+  let dropdownRef: HTMLDivElement | null = null;
 
   // Check-in mode: 'multi' => check-in daily, 'single' => single-day check-in
   let checkInMode: 'multi' | 'single' = (import.meta.env.VITE_CHECKIN_MODE === 'single' ? 'single' : 'multi');
@@ -145,6 +149,21 @@
     } else {
       stopCamera();
     }
+  }
+
+  // Event selector helper (optional): allow organizer to select which event codes belong to
+  function handleEventSelect(e: Event) {
+    const val = (e.target as HTMLSelectElement).value;
+    selectedEventId = val ? Number(val) : null;
+  }
+
+  function toggleDropdown() {
+    dropdownOpen = !dropdownOpen;
+  }
+
+  function selectEventById(id: number | null) {
+    selectedEventId = id;
+    dropdownOpen = false;
   }
   
   function clearPins() {
@@ -208,8 +227,18 @@
       if (verifyActionMode === 'checkout') {
         endpoint = endpoints.participations.checkoutByCode;
       } else {
-        // check-in: choose based on single vs multi-day mode
-        endpoint = checkInMode === 'single' ? endpoints.participations.checkIn : endpoints.participations.checkInDaily;
+        // check-in: prefer event-specific mode when an event is selected
+        if (selectedEventId) {
+          const ev = eventsList.find((x: any) => x.id === selectedEventId);
+          if (ev) {
+            endpoint = ev.isMultiDay ? endpoints.participations.checkInDaily : endpoints.participations.checkIn;
+          }
+        }
+
+        // fallback to global checkInMode if endpoint not determined by event
+        if (!endpoint) {
+          endpoint = checkInMode === 'single' ? endpoints.participations.checkIn : endpoints.participations.checkInDaily;
+        }
       }
       
       const payload = type === 'pin' 
@@ -269,6 +298,38 @@
       if (type === 'pin') clearPins();
 
     } catch (error: any) {
+      // If both endpoints failed with 422 and we have a selected event, try lookup (code -> participation_id)
+      const status = error?.response?.status;
+      if (verifyActionMode === 'checkin' && status === 422 && selectedEventId) {
+        try {
+          const lookup = await api.get(`/api/participations/my-codes/${selectedEventId}`);
+          const lookupData = lookup.data || lookup;
+          let found: any = null;
+          if (Array.isArray(lookupData)) {
+            found = lookupData.find((item: any) => String(item.join_code) === String(code) || String(item.completion_code) === String(code));
+          } else if (lookupData && (lookupData.join_code || lookupData.id)) {
+            if (String(lookupData.join_code) === String(code) || String(lookupData.id) === String(code)) found = lookupData;
+          }
+
+          if (found && (found.id || found.participation_id)) {
+            const pid = found.id || found.participation_id;
+            // Try check-in using participation_id payload
+            const pidPayload = { participation_id: pid };
+            const pidResp = await api.post(endpoints.participations.checkIn, pidPayload);
+            if (pidResp && (pidResp.data || pidResp).participant_name) {
+              lastParticipantName = (pidResp.data || pidResp).participant_name || "Participant";
+              lastVerifySuccess = true;
+              setTimeout(() => { lastVerifySuccess = false; }, 3000);
+              if (type === 'pin') clearPins();
+              isVerifying = false;
+              return;
+            }
+          }
+        } catch (lookupErr) {
+          // fall through to normal error handling
+        }
+      }
+
       verifyErrorMessage = error.response?.data?.message || error.response?.data?.detail || lang.invalidCode;
       if (type === 'pin') verifyErrorIndex = 0;
       
@@ -380,15 +441,79 @@
   
   onMount(() => {
     pinInputRefs[0]?.focus();
+    // Try to load events for organizer so we can do code->participation lookups
+    (async () => {
+      try {
+        const res = await api.get(endpoints.events.list);
+        const data = res.data || res;
+        if (Array.isArray(data)) {
+          eventsList = data.map((e: any) => {
+            const start = e.event_date || e.start_date || e.startDate || null;
+            const end = e.event_end_date || e.end_date || e.endDate || null;
+            const isMulti = start && end && new Date(start).toDateString() !== new Date(end).toDateString();
+            return {
+              id: e.id,
+              title: e.title || e.name || String(e.id),
+              startDate: start,
+              endDate: end,
+              isMultiDay: !!isMulti
+            };
+          });
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+
+    const onDocClick = (ev: MouseEvent) => {
+      if (!dropdownOpen) return;
+      if (dropdownRef && !dropdownRef.contains(ev.target as Node)) {
+        dropdownOpen = false;
+      }
+    };
+
+    document.addEventListener('click', onDocClick);
+    // store so we can remove in onDestroy
+    (onMount as any)._onDocClick = onDocClick;
   });
   
   onDestroy(() => {
     stopCamera();
+    const onDocClick = (onMount as any)._onDocClick;
+    if (onDocClick) document.removeEventListener('click', onDocClick);
   });
 </script>
 
 <div class="vc-container">
   <div class="vc-main-card">
+      {#if eventsList.length}
+        <div class="vc-event-select" style="margin-bottom:12px; display:flex; gap:8px; align-items:center;" bind:this={dropdownRef}>
+          <label style="color:#94a3b8; font-weight:600;">Select Event:</label>
+          <div class="vc-dropdown">
+            <button type="button" class="vc-dropdown-toggle" on:click={toggleDropdown} aria-haspopup="listbox" aria-expanded={dropdownOpen}>
+              {#if selectedEventId}
+                {#each eventsList.filter(e => e.id === selectedEventId) as evSelected}
+                  {evSelected.title}
+                {/each}
+              {:else}
+                (none)
+              {/if}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:8px;">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+
+            {#if dropdownOpen}
+              <ul class="vc-dropdown-menu" role="listbox">
+                <li class="vc-dropdown-item" on:click={() => selectEventById(null)} class:selected={selectedEventId === null}>(none)</li>
+                {#each eventsList as ev}
+                  <li class="vc-dropdown-item" on:click={() => selectEventById(ev.id)} class:selected={selectedEventId === ev.id}>{ev.title}</li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
+        </div>
+      {/if}
     <div class="vc-action-selector">
       <button class="vc-action-tab" class:active={verifyActionMode === "checkin"} on:click={() => switchActionMode("checkin")}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1340,6 +1465,81 @@
   .vc-loader.lg {
     width: 32px;
     height: 32px;
+  }
+
+  /* EVENT DROPDOWN */
+  .vc-event-select {
+    display: flex;
+    align-items: center;
+  }
+
+  .vc-dropdown {
+    position: relative;
+    /* allow menu to expand beyond container for long event titles; toggle kept compact */
+    min-width: 140px;
+  }
+
+  .vc-dropdown-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255,255,255,0.06);
+    color: #f8fafc;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 600;
+    min-width: 140px;
+    max-width: 260px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .vc-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    /* moderate menu width for readability without being too wide */
+    min-width: 220px;
+    width: auto;
+    max-width: 340px;
+    max-height: 280px;
+    overflow: auto;
+    background: rgba(3,7,18,0.95);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+    z-index: 99999;
+    padding: 6px;
+    box-shadow: 0 8px 30px rgba(2,6,23,0.6);
+  }
+
+  .vc-dropdown-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    color: #cbd5e1;
+    border-radius: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+  }
+
+  .vc-dropdown-item:hover {
+    background: rgba(255,255,255,0.03);
+    color: #fff;
+  }
+
+  .vc-dropdown-item:first-child {
+    font-style: italic;
+    color: #94a3b8;
+  }
+
+  .vc-dropdown-item.selected {
+    background: rgba(16, 185, 129, 0.12);
+    color: #e6ffef;
+    font-weight: 700;
   }
 
   /* ANIMATIONS */
