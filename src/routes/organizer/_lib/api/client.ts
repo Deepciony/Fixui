@@ -2,7 +2,13 @@ import axios, { type AxiosError, type AxiosInstance } from 'axios';
 import Swal from 'sweetalert2';
 
 // กำหนด URL API
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://158.108.102.14:8001').replace(/\/$/, '');
+// Use VITE_API_BASE_URL when provided. In dev (no env) use the Vite proxy '/api'.
+const rawApiBase = import.meta.env.VITE_API_BASE_URL;
+const DEFAULT_API_HOST = 'http://158.108.102.14:8001';
+const computedApiBase = rawApiBase
+  ? rawApiBase.replace(/\/$/, '')
+  : DEFAULT_API_HOST; // Force backend host when VITE_API_BASE_URL is not set
+export const API_BASE_URL = computedApiBase;
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
 

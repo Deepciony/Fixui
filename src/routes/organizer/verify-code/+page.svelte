@@ -6,9 +6,13 @@
   // ✅ Import API Endpoints
   import { endpoints } from '../_lib/api/endpoints';
 
-  // API Configuration
-  const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
-  
+  // API Configuration: prefer env; in dev without env use Vite proxy '/api', otherwise fall back to fixed host
+  const rawApiBase = import.meta.env.VITE_API_BASE_URL;
+  const DEFAULT_API_HOST = 'http://158.108.102.14:8001';
+  const API_BASE_URL = rawApiBase
+    ? rawApiBase.replace(/\/$/, '')
+    : DEFAULT_API_HOST; // Force backend host when VITE_API_BASE_URL is not set
+
   const api = axios.create({
     baseURL: API_BASE_URL,
     timeout: 30000,
@@ -101,6 +105,12 @@
   let lastParticipantName = "";
   let verifyErrorMessage = "";
   let verifyErrorIndex: number | null = null;
+
+  // Check-in mode: 'multi' => check-in daily, 'single' => single-day check-in
+  let checkInMode: 'multi' | 'single' = (import.meta.env.VITE_CHECKIN_MODE === 'single' ? 'single' : 'multi');
+  if (!import.meta.env.VITE_CHECKIN_MODE) {
+    console.info('VITE_CHECKIN_MODE not set — defaulting to "multi" (check-in-daily)');
+  }
   
   // ✅ [แก้ไข 1] PIN Mode: เหลือ 5 ช่อง
   let pins = ["", "", "", "", ""];
@@ -194,15 +204,39 @@
 
     try {
       // ✅ เลือก Endpoint ให้ถูกต้องตามประเภท
-      const endpoint = verifyActionMode === "checkout" 
-        ? endpoints.participants.checkOut 
-        : endpoints.participants.checkIn;
+      let endpoint = '';
+      if (verifyActionMode === 'checkout') {
+        endpoint = endpoints.participations.checkoutByCode;
+      } else {
+        // check-in: choose based on single vs multi-day mode
+        endpoint = checkInMode === 'single' ? endpoints.participations.checkIn : endpoints.participations.checkInDaily;
+      }
       
       const payload = type === 'pin' 
           ? { code, type: 'pin' } 
           : { qr_data: code, type: 'qr' };
 
-      const response = await api.post(endpoint, payload);
+      // Try primary endpoint, and if check-in returns 422 try the alternate check-in endpoint.
+      let response;
+      try {
+        response = await api.post(endpoint, payload);
+      } catch (err: any) {
+        const status = err?.response?.status;
+        // Only attempt automatic fallback for check-in actions when backend rejects (422)
+        if (verifyActionMode === 'checkin' && status === 422) {
+          const altEndpoint = endpoint === endpoints.participations.checkInDaily
+            ? endpoints.participations.checkIn
+            : endpoints.participations.checkInDaily;
+          try {
+            response = await api.post(altEndpoint, payload);
+          } catch (err2: any) {
+            // rethrow so outer catch handles it
+            throw err2;
+          }
+        } else {
+          throw err;
+        }
+      }
 
       // Success
       lastParticipantName = response.data.participant_name || 

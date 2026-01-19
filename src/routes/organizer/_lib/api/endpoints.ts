@@ -15,6 +15,8 @@ export const endpoints = {
 
     // 2. [POST] เช็คอินรายวัน (Organizer สแกน)
     checkInDaily: '/api/participations/check-in-daily',
+    // 2b. [POST] เช็คอินแบบ Single-day (บางระบบแยก endpoint)
+    checkIn: '/api/participations/check-in',
 
     // 3. Proofs (ดึงรายการหลักฐาน) - *ใช้ตัวเดิมที่แก้ไปแล้ว*
     listByEvent: (eventId: number | string) => `/api/participations/event/${eventId}/proofs`,
@@ -27,6 +29,8 @@ export const endpoints = {
 
     // 5. [POST] Checkout (Organizer สแกนเพื่อจบงาน)
     checkout: (participationId: number | string) => `/api/participations/${participationId}/checkout`,
+    // 6. [POST] Checkout by code/QR (Organizer scans code)
+    checkoutByCode: '/api/participations/checkout',
   },
   
   // Proof Submissions
