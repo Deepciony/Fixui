@@ -313,8 +313,8 @@
             );
             
             const isWeekendPattern = weekendDates.length > 0 && 
-                                    weekendDates.length === holidayDateStrings.length &&
-                                    weekendDates.every(wd => holidayDateStrings.includes(wd));
+                                     weekendDates.length === holidayDateStrings.length &&
+                                     weekendDates.every(wd => holidayDateStrings.includes(wd));
             
             if (isWeekendPattern) {
               formData.holidayType = 'weekends';
@@ -693,60 +693,60 @@
 
       // 4. Handle Rewards (✅ NEW: Competition-based reward system)
       if (formData.totalRewards && formData.rewardTiers.length > 0 && formData.rewardTiers[0].reward_name && targetId) {
-         
-         // สร้าง reward items โดยเรียงจากยากไปง่าย
-         const sortedTiers = [...formData.rewardTiers].sort((a, b) => {
-           const aComp = Number(a.required_completions) || 0;
-           const bComp = Number(b.required_completions) || 0;
-           return bComp - aComp; // มากไปน้อย (ยากไปง่าย)
-         });
-         
-         const createdTiers = await Promise.all(sortedTiers.map(async (t, idx) => {
-             if (!t.reward_name || !t.required_completions || t.required_completions <= 0) {
-               console.warn("Skipping invalid tier:", t);
-               return null;
-             }
-             
-             try {
-                 const rewardRes = await api.post('/api/rewards/', { 
-                     name: t.reward_name, 
-                     description: `Reward: ${t.reward_name} (${t.required_completions} completions required)`,
-                     required_completions: Number(t.required_completions)
-                 });
-                 return { 
-                   ...t, 
-                   reward_id: rewardRes.data.id,
-                   tier_order: idx + 1 // เรียงจากยากไปง่าย
-                 };
-             } catch (e) {
-                 console.error("Failed to create reward item:", e);
-                 return null;
-             }
-         }));
+          
+          // สร้าง reward items โดยเรียงจากยากไปง่าย
+          const sortedTiers = [...formData.rewardTiers].sort((a, b) => {
+            const aComp = Number(a.required_completions) || 0;
+            const bComp = Number(b.required_completions) || 0;
+            return bComp - aComp; // มากไปน้อย (ยากไปง่าย)
+          });
+          
+          const createdTiers = await Promise.all(sortedTiers.map(async (t, idx) => {
+              if (!t.reward_name || !t.required_completions || t.required_completions <= 0) {
+                console.warn("Skipping invalid tier:", t);
+                return null;
+              }
+              
+              try {
+                  const rewardRes = await api.post('/api/rewards/', { 
+                      name: t.reward_name, 
+                      description: `Reward: ${t.reward_name} (${t.required_completions} completions required)`,
+                      required_completions: Number(t.required_completions)
+                  });
+                  return { 
+                    ...t, 
+                    reward_id: rewardRes.data.id,
+                    tier_order: idx + 1 // เรียงจากยากไปง่าย
+                  };
+              } catch (e) {
+                  console.error("Failed to create reward item:", e);
+                  return null;
+              }
+          }));
 
-         const validTiers = createdTiers.filter(t => t !== null);
+          const validTiers = createdTiers.filter(t => t !== null);
 
-         if (validTiers.length > 0) {
-             const total = Number(formData.totalRewards) || 300;
-             
-             // ✅ Build reward_tiers with competition logic
-             const rewardConfigPayload = {
-                 event_id: Number(targetId),
-                 name: `Leaderboard for ${formData.title}`,
-                 description: `Competition-based reward distribution`, 
-                 max_reward_recipients: total, // จำนวนรางวัลทั้งหมด (เช่น 300)
-                 required_completions: 1, // ✅ ต้องวิ่งอย่างน้อย 1 รอบเพื่อเข้าลีดเดอร์บอร์ด
-                 starts_at: new Date(`${startDateStr}T${formData.startTime}:00`).toISOString(), 
-                 ends_at: (() => {
-                     // ✅ ถ้าวันเดียว (start = end) ให้ใช้เวลาสิ้นสุดวัน
-                     if (startDateStr === endDateStr && formData.startTime === formData.endTime) {
-                         return new Date(`${endDateStr}T23:59:59`).toISOString();
-                     }
-                     // ✅ ถ้าวันเดียวแต่มีเวลาต่างกัน หรือหลายวัน ใช้ตามปกติ
-                     return new Date(`${endDateStr}T${formData.endTime}:00`).toISOString();
-                 })(),
-                 
-                 reward_tiers: validTiers.map((t, idx) => {
+          if (validTiers.length > 0) {
+              const total = Number(formData.totalRewards) || 300;
+              
+              // ✅ Build reward_tiers with competition logic
+              const rewardConfigPayload = {
+                  event_id: Number(targetId),
+                  name: `Leaderboard for ${formData.title}`,
+                  description: `Competition-based reward distribution`, 
+                  max_reward_recipients: total, // จำนวนรางวัลทั้งหมด (เช่น 300)
+                  required_completions: 1, // ✅ ต้องวิ่งอย่างน้อย 1 รอบเพื่อเข้าลีดเดอร์บอร์ด
+                  starts_at: new Date(`${startDateStr}T${formData.startTime}:00`).toISOString(), 
+                  ends_at: (() => {
+                      // ✅ ถ้าวันเดียว (start = end) ให้ใช้เวลาสิ้นสุดวัน
+                      if (startDateStr === endDateStr && formData.startTime === formData.endTime) {
+                          return new Date(`${endDateStr}T23:59:59`).toISOString();
+                      }
+                      // ✅ ถ้าวันเดียวแต่มีเวลาต่างกัน หรือหลายวัน ใช้ตามปกติ
+                      return new Date(`${endDateStr}T${formData.endTime}:00`).toISOString();
+                  })(),
+                  
+                  reward_tiers: validTiers.map((t, idx) => {
                     const finalStartsAt = new Date(`${startDateStr}T${formData.startTime}:00`).toISOString();
                     const finalEndsAt = (() => {
                         if (startDateStr === endDateStr && formData.startTime === formData.endTime) {
@@ -796,171 +796,171 @@
                         min_rank: minRank,
                         max_rank: maxRank
                     };
-                 })
-             };
+                  })
+              };
 
-             try {
-                 if (editingRewardConfigId) {
-                     // Try to update existing config
-                     try {
-                         await api.put(`/api/reward-leaderboards/configs/${editingRewardConfigId}`, rewardConfigPayload);
-                     } catch (updateErr: any) {
-                         // If update fails (corrupt config), delete and recreate
-                         console.warn("Update failed, deleting corrupt config and recreating:", updateErr);
-                         try {
-                             await api.delete(`/api/reward-leaderboards/configs/${editingRewardConfigId}`);
-                         } catch (delErr) {
-                             console.warn("Delete failed, will create new:", delErr);
-                         }
-                         await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
-                     }
-                 } else {
-                     // Try to create new config
-                     try {
-                         await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
-                     } catch (createErr: any) {
-                         // If creation fails because config already exists, GET it and UPDATE
-                         if (createErr.response?.status === 400 && 
-                             createErr.response?.data?.detail?.includes('already has a leaderboard')) {
-                             console.warn("Config already exists, will fetch and update instead");
-                             
-                             try {
-                                 // Get the existing config
-                                 const existingConfig = await api.get(`/api/reward-leaderboards/configs/event/${rewardConfigPayload.event_id}`);
-                                 const configId = existingConfig.data?.id;
-                                 
-                                 if (configId) {
-                                     console.log("Found existing config ID:", configId, "- updating it");
-                                     // Update the existing config instead of creating new
-                                     await api.put(`/api/reward-leaderboards/configs/${configId}`, rewardConfigPayload);
-                                     console.log("✅ Updated existing reward config");
-                                 } else {
-                                     throw new Error("Config exists but no ID found");
-                                 }
-                             } catch (fetchErr: any) {
-                                 // If GET also fails (500 - corrupt), offer to force delete
-                                 if (fetchErr.response?.status === 500) {
-                                     console.error("Existing config is corrupt and cannot be updated");
-                                     
-                                     // Ask user if they want to force reset
-                                     const result = await Swal.fire({
-                                         icon: 'warning',
-                                         title: 'Corrupt Reward Config Detected',
-                                         html: `
-                                             <p>The existing reward configuration for this event is corrupted.</p>
-                                             <p><strong>Would you like to reset it?</strong></p>
-                                             <p style="font-size: 0.9em; color: #94a3b8; margin-top: 1rem;">
-                                                 This will delete the old configuration and create a new one.
-                                             </p>
-                                         `,
-                                         showCancelButton: true,
-                                         confirmButtonText: 'Yes, Reset Config',
-                                         cancelButtonText: 'Skip for Now',
-                                         confirmButtonColor: '#ef4444',
-                                         cancelButtonColor: '#64748b',
-                                         background: '#1e293b',
-                                         color: '#fff'
-                                     });
-                                     
-                                     if (result.isConfirmed) {
-                                         // User wants to force reset
-                                         try {
-                                             // Option 1: Try DELETE with event_id if backend supports it
-                                             try {
-                                                 await api.delete(`/api/reward-leaderboards/configs/event/${rewardConfigPayload.event_id}`);
-                                                 console.log("✅ Deleted corrupt config via event_id");
-                                             } catch (delErr) {
-                                                 console.warn("DELETE by event_id not supported, trying direct ID...");
-                                                 throw new Error("Cannot auto-delete. Please contact support.");
-                                             }
-                                             
-                                             // Now create fresh config
-                                             await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
-                                             console.log("✅ Created fresh reward config");
-                                             
-                                             Swal.fire({
-                                                 icon: 'success',
-                                                 title: 'Config Reset Successful',
-                                                 text: 'Reward configuration has been reset and recreated.',
-                                                 background: '#1e293b',
-                                                 color: '#fff',
-                                                 timer: 2000
-                                             });
-                                         } catch (resetErr: any) {
-                                             console.error("Force reset failed:", resetErr);
-                                             Swal.fire({
-                                                 icon: 'error',
-                                                 title: 'Reset Failed',
-                                                 html: `
-                                                     <p>Could not automatically reset the configuration.</p>
-                                                     <p style="margin-top: 1rem; font-size: 0.9em; color: #94a3b8;">
-                                                         Please contact support with this Event ID: <strong>${rewardConfigPayload.event_id}</strong>
-                                                     </p>
-                                                     <p style="margin-top: 0.5rem; font-size: 0.85em; color: #94a3b8;">
-                                                         SQL: DELETE FROM reward_leaderboard_configs WHERE event_id = ${rewardConfigPayload.event_id};
-                                                     </p>
-                                                 `,
-                                                 background: '#1e293b',
-                                                 color: '#fff'
-                                             });
-                                         }
-                                     } else {
-                                         // User chose to skip
-                                         Swal.fire({
-                                             icon: 'info',
-                                             title: 'Skipped',
-                                             text: 'Event saved. Reward config remains unchanged.',
-                                             background: '#1e293b',
-                                             color: '#fff',
-                                             timer: 2000
-                                         });
-                                     }
-                                     return; // Exit reward handling
-                                 }
-                                 throw fetchErr;
-                             }
-                         } else {
-                             throw createErr;
-                         }
-                     }
-                 }
-                 console.log("✅ Reward config saved successfully");
-             } catch (rewErr: any) {
-                 console.error("Failed to save reward config:", rewErr);
-                 console.error("Response data:", rewErr.response?.data);
-                 console.error("Payload sent:", rewardConfigPayload);
-                 
-                 let msg = 'บันทึกรางวัลไม่สำเร็จ';
-                 if (rewErr.response?.data?.detail) {
-                     if (Array.isArray(rewErr.response.data.detail)) {
-                         // Log each validation error
-                         console.error("Validation Errors:");
-                         rewErr.response.data.detail.forEach((e: any, idx: number) => {
-                             console.error(`  ${idx + 1}. Field: ${e.loc?.join(' → ')}`);
-                             console.error(`     Error: ${e.msg}`);
-                             console.error(`     Type: ${e.type}`);
-                         });
-                         
-                         // Format for display
-                         msg = 'Validation Errors:\n\n' + rewErr.response.data.detail.map((e: any, idx: number) => 
-                             `${idx + 1}. ${e.loc?.join(' → ')}\n   ${e.msg}`
-                         ).join('\n\n');
-                     } else {
-                         msg = rewErr.response.data.detail;
-                     }
-                 }
-                 
-                 Swal.fire({ 
-                   icon: 'error', 
-                   title: 'Reward Save Failed', 
-                   html: `<pre style="text-align: left; font-size: 0.85em; max-height: 400px; overflow-y: auto;">${msg}</pre>`,
-                   background: '#1e293b',
-                   color: '#fff',
-                   confirmButtonColor: '#ef4444',
-                   width: '600px'
-                 });
-             }
-         }
+              try {
+                  if (editingRewardConfigId) {
+                      // Try to update existing config
+                      try {
+                          await api.put(`/api/reward-leaderboards/configs/${editingRewardConfigId}`, rewardConfigPayload);
+                      } catch (updateErr: any) {
+                          // If update fails (corrupt config), delete and recreate
+                          console.warn("Update failed, deleting corrupt config and recreating:", updateErr);
+                          try {
+                              await api.delete(`/api/reward-leaderboards/configs/${editingRewardConfigId}`);
+                          } catch (delErr) {
+                              console.warn("Delete failed, will create new:", delErr);
+                          }
+                          await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
+                      }
+                  } else {
+                      // Try to create new config
+                      try {
+                          await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
+                      } catch (createErr: any) {
+                          // If creation fails because config already exists, GET it and UPDATE
+                          if (createErr.response?.status === 400 && 
+                              createErr.response?.data?.detail?.includes('already has a leaderboard')) {
+                              console.warn("Config already exists, will fetch and update instead");
+                              
+                              try {
+                                  // Get the existing config
+                                  const existingConfig = await api.get(`/api/reward-leaderboards/configs/event/${rewardConfigPayload.event_id}`);
+                                  const configId = existingConfig.data?.id;
+                                  
+                                  if (configId) {
+                                      console.log("Found existing config ID:", configId, "- updating it");
+                                      // Update the existing config instead of creating new
+                                      await api.put(`/api/reward-leaderboards/configs/${configId}`, rewardConfigPayload);
+                                      console.log("✅ Updated existing reward config");
+                                  } else {
+                                      throw new Error("Config exists but no ID found");
+                                  }
+                              } catch (fetchErr: any) {
+                                  // If GET also fails (500 - corrupt), offer to force delete
+                                  if (fetchErr.response?.status === 500) {
+                                      console.error("Existing config is corrupt and cannot be updated");
+                                      
+                                      // Ask user if they want to force reset
+                                      const result = await Swal.fire({
+                                          icon: 'warning',
+                                          title: 'Corrupt Reward Config Detected',
+                                          html: `
+                                              <p>The existing reward configuration for this event is corrupted.</p>
+                                              <p><strong>Would you like to reset it?</strong></p>
+                                              <p style="font-size: 0.9em; color: #94a3b8; margin-top: 1rem;">
+                                                  This will delete the old configuration and create a new one.
+                                              </p>
+                                          `,
+                                          showCancelButton: true,
+                                          confirmButtonText: 'Yes, Reset Config',
+                                          cancelButtonText: 'Skip for Now',
+                                          confirmButtonColor: '#ef4444',
+                                          cancelButtonColor: '#64748b',
+                                          background: '#1e293b',
+                                          color: '#fff'
+                                      });
+                                      
+                                      if (result.isConfirmed) {
+                                          // User wants to force reset
+                                          try {
+                                              // Option 1: Try DELETE with event_id if backend supports it
+                                              try {
+                                                  await api.delete(`/api/reward-leaderboards/configs/event/${rewardConfigPayload.event_id}`);
+                                                  console.log("✅ Deleted corrupt config via event_id");
+                                              } catch (delErr) {
+                                                  console.warn("DELETE by event_id not supported, trying direct ID...");
+                                                  throw new Error("Cannot auto-delete. Please contact support.");
+                                              }
+                                              
+                                              // Now create fresh config
+                                              await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
+                                              console.log("✅ Created fresh reward config");
+                                              
+                                              Swal.fire({
+                                                  icon: 'success',
+                                                  title: 'Config Reset Successful',
+                                                  text: 'Reward configuration has been reset and recreated.',
+                                                  background: '#1e293b',
+                                                  color: '#fff',
+                                                  timer: 2000
+                                              });
+                                          } catch (resetErr: any) {
+                                              console.error("Force reset failed:", resetErr);
+                                              Swal.fire({
+                                                  icon: 'error',
+                                                  title: 'Reset Failed',
+                                                  html: `
+                                                      <p>Could not automatically reset the configuration.</p>
+                                                      <p style="margin-top: 1rem; font-size: 0.9em; color: #94a3b8;">
+                                                          Please contact support with this Event ID: <strong>${rewardConfigPayload.event_id}</strong>
+                                                      </p>
+                                                      <p style="margin-top: 0.5rem; font-size: 0.85em; color: #94a3b8;">
+                                                          SQL: DELETE FROM reward_leaderboard_configs WHERE event_id = ${rewardConfigPayload.event_id};
+                                                      </p>
+                                                  `,
+                                                  background: '#1e293b',
+                                                  color: '#fff'
+                                              });
+                                          }
+                                      } else {
+                                          // User chose to skip
+                                          Swal.fire({
+                                              icon: 'info',
+                                              title: 'Skipped',
+                                              text: 'Event saved. Reward config remains unchanged.',
+                                              background: '#1e293b',
+                                              color: '#fff',
+                                              timer: 2000
+                                          });
+                                      }
+                                      return; // Exit reward handling
+                                  }
+                                  throw fetchErr;
+                              }
+                          } else {
+                              throw createErr;
+                          }
+                      }
+                  }
+                  console.log("✅ Reward config saved successfully");
+              } catch (rewErr: any) {
+                  console.error("Failed to save reward config:", rewErr);
+                  console.error("Response data:", rewErr.response?.data);
+                  console.error("Payload sent:", rewardConfigPayload);
+                  
+                  let msg = 'บันทึกรางวัลไม่สำเร็จ';
+                  if (rewErr.response?.data?.detail) {
+                      if (Array.isArray(rewErr.response.data.detail)) {
+                          // Log each validation error
+                          console.error("Validation Errors:");
+                          rewErr.response.data.detail.forEach((e: any, idx: number) => {
+                              console.error(`  ${idx + 1}. Field: ${e.loc?.join(' → ')}`);
+                              console.error(`      Error: ${e.msg}`);
+                              console.error(`      Type: ${e.type}`);
+                          });
+                          
+                          // Format for display
+                          msg = 'Validation Errors:\n\n' + rewErr.response.data.detail.map((e: any, idx: number) => 
+                              `${idx + 1}. ${e.loc?.join(' → ')}\n   ${e.msg}`
+                          ).join('\n\n');
+                      } else {
+                          msg = rewErr.response.data.detail;
+                      }
+                  }
+                  
+                  Swal.fire({ 
+                    icon: 'error', 
+                    title: 'Reward Save Failed', 
+                    html: `<pre style="text-align: left; font-size: 0.85em; max-height: 400px; overflow-y: auto;">${msg}</pre>`,
+                    background: '#1e293b',
+                    color: '#fff',
+                    confirmButtonColor: '#ef4444',
+                    width: '600px'
+                  });
+              }
+          }
       }
       
       await Swal.fire({ 
@@ -989,6 +989,21 @@
   }
   
   function cancel() { goto('/organizer/events'); }
+
+  // ✅ 3. Helper function to format time input (00:00)
+  function handleTimeInput(field: 'startTime' | 'endTime', event: Event) {
+    const input = event.target as HTMLInputElement;
+    let val = input.value.replace(/[^0-9]/g, ''); // Allow only numbers
+
+    if (val.length > 4) val = val.slice(0, 4);
+
+    if (val.length > 2) {
+        val = val.slice(0, 2) + ':' + val.slice(2);
+    }
+
+    formData[field] = val;
+    input.value = val;
+  }
 </script>
 
 <div class="ce-wrapper" on:click={() => (activeDropdown = null)}>
@@ -1055,7 +1070,58 @@
           <div class="ce-date-row" class:error={validationErrors.has("endDate")}><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("eDay")}><input type="text" value={formData.eDay} placeholder={lang.dayPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "eDay"}<div class="ce-options" on:click|stopPropagation>{#each days as d}<button class="ce-opt" on:click|stopPropagation={() => selectOption("eDay", d)}>{d}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-2"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("eMonth")}><input type="text" value={translateMonth(formData.eMonth)} placeholder={lang.monthPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "eMonth"}<div class="ce-options" on:click|stopPropagation>{#each months as m, idx}<button class="ce-opt" on:click|stopPropagation={() => selectOption("eMonth", m)}>{displayMonths[idx]}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("eYear")}><input type="text" value={formData.eYear} placeholder={lang.yearPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "eYear"}<div class="ce-options" on:click|stopPropagation>{#each years as y}<button class="ce-opt" on:click|stopPropagation={() => selectOption("eYear", y)}>{y}</button>{/each}</div>{/if}</div></div>
         {/if}
         </div>
-        <div class="ce-dual-row"><div class="ce-input-group"><label>{lang.startTimeLabel} <span class="ce-req">*</span></label><div class="ce-dd-wrap"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("startTime")}><input type="text" value={formData.startTime} placeholder={lang.selectTime} class="ce-input-dis" class:error={validationErrors.has("startTime")} readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "startTime"}<div class="ce-options time-scroll" on:click|stopPropagation>{#each times as t}<button class="ce-opt" on:click|stopPropagation={() => selectOption("startTime", t)}>{t}</button>{/each}</div>{/if}</div></div><div class="ce-input-group"><label>{lang.endTimeLabel} <span class="ce-req">*</span></label><div class="ce-dd-wrap"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("endTime")}><input type="text" value={formData.endTime} placeholder={lang.selectTime} class="ce-input-dis" class:error={validationErrors.has("endTime")} readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "endTime"}<div class="ce-options time-scroll" on:click|stopPropagation>{#each times as t}<button class="ce-opt" on:click|stopPropagation={() => selectOption("endTime", t)}>{t}</button>{/each}</div>{/if}</div></div></div>
+        
+        <div class="ce-dual-row">
+          <div class="ce-input-group">
+            <label>{lang.startTimeLabel} <span class="ce-req">*</span></label>
+            <div class="ce-dd-wrap">
+              <div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("startTime")}>
+                <input 
+                  type="text" 
+                  value={formData.startTime} 
+                  placeholder="08:00" 
+                  class="ce-input" 
+                  class:error={validationErrors.has("startTime")} 
+                  on:input={(e) => handleTimeInput("startTime", e)} 
+                  on:click|stopPropagation={() => activeDropdown = "startTime"}
+                />
+                <span class="ce-arrow">▼</span>
+              </div>
+              {#if activeDropdown === "startTime"}
+                <div class="ce-options time-scroll" on:click|stopPropagation>
+                  {#each times as t}
+                    <button class="ce-opt" on:click|stopPropagation={() => selectOption("startTime", t)}>{t}</button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          </div>
+          <div class="ce-input-group">
+            <label>{lang.endTimeLabel} <span class="ce-req">*</span></label>
+            <div class="ce-dd-wrap">
+              <div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("endTime")}>
+                <input 
+                  type="text" 
+                  value={formData.endTime} 
+                  placeholder="16:00" 
+                  class="ce-input" 
+                  class:error={validationErrors.has("endTime")} 
+                  on:input={(e) => handleTimeInput("endTime", e)} 
+                  on:click|stopPropagation={() => activeDropdown = "endTime"}
+                />
+                <span class="ce-arrow">▼</span>
+              </div>
+              {#if activeDropdown === "endTime"}
+                <div class="ce-options time-scroll" on:click|stopPropagation>
+                  {#each times as t}
+                    <button class="ce-opt" on:click|stopPropagation={() => selectOption("endTime", t)}>{t}</button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          </div>
+        </div>
+
       </div>
 
       <div class="ce-card ce-config-card">

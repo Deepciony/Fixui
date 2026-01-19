@@ -48,6 +48,8 @@
     th: {
       checkIn: "เช็คอิน",
       checkOut: "เช็คเอาท์",
+      typeSingle: "กิจกรรมหลายวัน",   // ✅ เพิ่ม
+      typeMulti: "กิจกรรมวันเดียว",    // ✅ เพิ่ม
       participantCheckIn: "เช็คอินผู้เข้าร่วม",
       participantCheckOut: "เช็คเอาท์ผู้เข้าร่วม",
       verifyParticipantCode: "ตรวจสอบรหัสผู้เข้าร่วมงาน",
@@ -71,6 +73,8 @@
     en: {
       checkIn: "Check In",
       checkOut: "Check Out",
+      typeSingle: "General Activity", // ✅ เพิ่ม
+      typeMulti: "Daily Check-in",    // ✅ เพิ่ม
       participantCheckIn: "Participant Check-In",
       participantCheckOut: "Participant Check-Out",
       verifyParticipantCode: "Verify participant code",
@@ -98,6 +102,10 @@
   // State
   let verifyActionMode: "checkin" | "checkout" = "checkin";
   let verifyMode: "pin" | "qr" = "pin";
+  
+  // ✅ [เพิ่ม] State สำหรับเลือกประเภทกิจกรรม (Single/Multi)
+  let eventTypeMode: "single" | "multi" = "single";
+
   let autoCheckIn = false;
   let isVerifying = false;
   let lastVerifySuccess = false;
@@ -105,10 +113,8 @@
   let lastParticipantName = "";
   let verifyErrorMessage = "";
   let verifyErrorIndex: number | null = null;
-  let eventsList: Array<any> = [];
-  let selectedEventId: number | null = null;
-  let dropdownOpen = false;
-  let dropdownRef: HTMLDivElement | null = null;
+  
+  // ✅ [ลบ] eventsList, selectedEventId, dropdownOpen, dropdownRef ออก เพราะไม่ใช้แล้ว
 
   // Check-in mode: 'multi' => check-in daily, 'single' => single-day check-in
   let checkInMode: 'multi' | 'single' = (import.meta.env.VITE_CHECKIN_MODE === 'single' ? 'single' : 'multi');
@@ -138,6 +144,13 @@
     lastVerifySuccess = false;
     lastCheckOutSuccess = false;
   }
+
+  // ✅ [เพิ่ม] ฟังก์ชันสลับประเภทกิจกรรม
+  function switchEventTypeMode(mode: "single" | "multi") {
+    eventTypeMode = mode;
+    clearPins();
+    verifyErrorMessage = "";
+  }
   
   function switchVerifyMode(mode: "pin" | "qr") {
     verifyMode = mode;
@@ -151,20 +164,7 @@
     }
   }
 
-  // Event selector helper (optional): allow organizer to select which event codes belong to
-  function handleEventSelect(e: Event) {
-    const val = (e.target as HTMLSelectElement).value;
-    selectedEventId = val ? Number(val) : null;
-  }
-
-  function toggleDropdown() {
-    dropdownOpen = !dropdownOpen;
-  }
-
-  function selectEventById(id: number | null) {
-    selectedEventId = id;
-    dropdownOpen = false;
-  }
+  // ✅ [ลบ] handleEventSelect, toggleDropdown, selectEventById ออก
   
   function clearPins() {
     pins = ["", "", "", "", ""]; // ✅ 5 ช่อง
@@ -222,28 +222,20 @@
     verifyErrorIndex = null;
 
     try {
-      // ✅ เลือก Endpoint ให้ถูกต้องตามประเภท
+      // ✅ เลือก Endpoint ตามโหมดที่ผู้ใช้เลือก (Single หรือ Multi)
       let endpoint = '';
       if (verifyActionMode === 'checkout') {
         endpoint = endpoints.participations.checkoutByCode;
       } else {
-        // check-in: prefer event-specific mode when an event is selected
-        if (selectedEventId) {
-          const ev = eventsList.find((x: any) => x.id === selectedEventId);
-          if (ev) {
-            endpoint = ev.isMultiDay ? endpoints.participations.checkInDaily : endpoints.participations.checkIn;
-          }
-        }
-
-        // fallback to global checkInMode if endpoint not determined by event
-        if (!endpoint) {
-          endpoint = checkInMode === 'single' ? endpoints.participations.checkIn : endpoints.participations.checkInDaily;
-        }
+         // ถ้าเป็น Check-in ให้ดูว่าเลือก Activity (Single) หรือ Project (Multi/Daily) จาก Toggle
+         endpoint = eventTypeMode === 'multi' 
+          ? endpoints.participations.checkInDaily 
+          : endpoints.participations.checkIn;
       }
       
       const payload = type === 'pin' 
-          ? { code, type: 'pin' } 
-          : { qr_data: code, type: 'qr' };
+          ? { code, join_code: code, type: 'pin' } 
+          : { qr_data: code, join_code: code, type: 'qr' };
 
       // Try primary endpoint, and if check-in returns 422 try the alternate check-in endpoint.
       let response;
@@ -251,12 +243,15 @@
         response = await api.post(endpoint, payload);
       } catch (err: any) {
         const status = err?.response?.status;
-        // Only attempt automatic fallback for check-in actions when backend rejects (422)
-        if (verifyActionMode === 'checkin' && status === 422) {
+        
+        // ✅ [แก้ไขจุดที่ 1] เพิ่มเงื่อนไข status === 404 และ 400 เพื่อให้สลับ API อัตโนมัติเมื่อหาไม่เจอ
+        // Only attempt automatic fallback for check-in actions when backend rejects (422, 404, or 400)
+        if (verifyActionMode === 'checkin' && (status === 422 || status === 404 || status === 400)) {
           const altEndpoint = endpoint === endpoints.participations.checkInDaily
             ? endpoints.participations.checkIn
             : endpoints.participations.checkInDaily;
           try {
+            console.log("Primary endpoint failed, trying alternate:", altEndpoint); // Optional log
             response = await api.post(altEndpoint, payload);
           } catch (err2: any) {
             // rethrow so outer catch handles it
@@ -298,38 +293,7 @@
       if (type === 'pin') clearPins();
 
     } catch (error: any) {
-      // If both endpoints failed with 422 and we have a selected event, try lookup (code -> participation_id)
-      const status = error?.response?.status;
-      if (verifyActionMode === 'checkin' && status === 422 && selectedEventId) {
-        try {
-          const lookup = await api.get(`/api/participations/my-codes/${selectedEventId}`);
-          const lookupData = lookup.data || lookup;
-          let found: any = null;
-          if (Array.isArray(lookupData)) {
-            found = lookupData.find((item: any) => String(item.join_code) === String(code) || String(item.completion_code) === String(code));
-          } else if (lookupData && (lookupData.join_code || lookupData.id)) {
-            if (String(lookupData.join_code) === String(code) || String(lookupData.id) === String(code)) found = lookupData;
-          }
-
-          if (found && (found.id || found.participation_id)) {
-            const pid = found.id || found.participation_id;
-            // Try check-in using participation_id payload
-            const pidPayload = { participation_id: pid };
-            const pidResp = await api.post(endpoints.participations.checkIn, pidPayload);
-            if (pidResp && (pidResp.data || pidResp).participant_name) {
-              lastParticipantName = (pidResp.data || pidResp).participant_name || "Participant";
-              lastVerifySuccess = true;
-              setTimeout(() => { lastVerifySuccess = false; }, 3000);
-              if (type === 'pin') clearPins();
-              isVerifying = false;
-              return;
-            }
-          }
-        } catch (lookupErr) {
-          // fall through to normal error handling
-        }
-      }
-
+      // ✅ [ลบ] Logic การ Lookup ผ่าน selectedEventId ออก เพราะเราไม่มี Event Select แล้ว
       verifyErrorMessage = error.response?.data?.message || error.response?.data?.detail || lang.invalidCode;
       if (type === 'pin') verifyErrorIndex = 0;
       
@@ -441,79 +405,17 @@
   
   onMount(() => {
     pinInputRefs[0]?.focus();
-    // Try to load events for organizer so we can do code->participation lookups
-    (async () => {
-      try {
-        const res = await api.get(endpoints.events.list);
-        const data = res.data || res;
-        if (Array.isArray(data)) {
-          eventsList = data.map((e: any) => {
-            const start = e.event_date || e.start_date || e.startDate || null;
-            const end = e.event_end_date || e.end_date || e.endDate || null;
-            const isMulti = start && end && new Date(start).toDateString() !== new Date(end).toDateString();
-            return {
-              id: e.id,
-              title: e.title || e.name || String(e.id),
-              startDate: start,
-              endDate: end,
-              isMultiDay: !!isMulti
-            };
-          });
-        }
-      } catch (e) {
-        // ignore
-      }
-    })();
-
-    const onDocClick = (ev: MouseEvent) => {
-      if (!dropdownOpen) return;
-      if (dropdownRef && !dropdownRef.contains(ev.target as Node)) {
-        dropdownOpen = false;
-      }
-    };
-
-    document.addEventListener('click', onDocClick);
-    // store so we can remove in onDestroy
-    (onMount as any)._onDocClick = onDocClick;
+    // ✅ [ลบ] ส่วนโหลด Event List ออก
   });
   
   onDestroy(() => {
     stopCamera();
-    const onDocClick = (onMount as any)._onDocClick;
-    if (onDocClick) document.removeEventListener('click', onDocClick);
+    // ✅ [ลบ] event listener ของ dropdown ออก
   });
 </script>
 
 <div class="vc-container">
   <div class="vc-main-card">
-      {#if eventsList.length}
-        <div class="vc-event-select" style="margin-bottom:12px; display:flex; gap:8px; align-items:center;" bind:this={dropdownRef}>
-          <label style="color:#94a3b8; font-weight:600;">Select Event:</label>
-          <div class="vc-dropdown">
-            <button type="button" class="vc-dropdown-toggle" on:click={toggleDropdown} aria-haspopup="listbox" aria-expanded={dropdownOpen}>
-              {#if selectedEventId}
-                {#each eventsList.filter(e => e.id === selectedEventId) as evSelected}
-                  {evSelected.title}
-                {/each}
-              {:else}
-                (none)
-              {/if}
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:8px;">
-                <polyline points="6 9 12 15 18 9"></polyline>
-              </svg>
-            </button>
-
-            {#if dropdownOpen}
-              <ul class="vc-dropdown-menu" role="listbox">
-                <li class="vc-dropdown-item" on:click={() => selectEventById(null)} class:selected={selectedEventId === null}>(none)</li>
-                {#each eventsList as ev}
-                  <li class="vc-dropdown-item" on:click={() => selectEventById(ev.id)} class:selected={selectedEventId === ev.id}>{ev.title}</li>
-                {/each}
-              </ul>
-            {/if}
-          </div>
-        </div>
-      {/if}
     <div class="vc-action-selector">
       <button class="vc-action-tab" class:active={verifyActionMode === "checkin"} on:click={() => switchActionMode("checkin")}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -535,6 +437,30 @@
       
       <div class="vc-action-slider" class:checkout={verifyActionMode === "checkout"}></div>
     </div>
+
+    {#if verifyActionMode === "checkin"}
+      <div class="vc-type-selector">
+        <button class="vc-type-tab" class:active={eventTypeMode === "single"} on:click={() => switchEventTypeMode("single")}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            <span>{lang.typeSingle}</span>
+        </button>
+
+        <button class="vc-type-tab multi" class:active={eventTypeMode === "multi"} on:click={() => switchEventTypeMode("multi")}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="16" y1="2" x2="16" y2="6"></line>
+                <line x1="8" y1="2" x2="8" y2="6"></line>
+                <line x1="3" y1="10" x2="21" y2="10"></line>
+            </svg>
+            <span>{lang.typeMulti}</span>
+        </button>
+
+        <div class="vc-type-slider" class:multi={eventTypeMode === "multi"}></div>
+      </div>
+    {/if}
 
     <div class="vc-card-header">
       <div class="vc-icon-wrapper" class:checkout={verifyActionMode === "checkout"}>
@@ -845,6 +771,53 @@
     transform: translateX(calc(100% + 0.5rem));
     background: linear-gradient(135deg, #f59e0b, #d97706);
   }
+
+  /* ✅ Type Selector (New) */
+  .vc-type-selector {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    background: rgba(15, 23, 42, 0.3);
+    padding: 0.35rem;
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+    border: 1px solid rgba(255,255,255,0.05);
+  }
+  
+  .vc-type-tab {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0.5rem;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: #64748b;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+  
+  .vc-type-tab.active { color: #fff; }
+  
+  .vc-type-slider {
+    position: absolute;
+    top: 0.35rem;
+    left: 0.35rem;
+    width: calc(50% - 0.175rem);
+    height: calc(100% - 0.7rem);
+    background: #334155;
+    border-radius: 8px;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1;
+  }
+  
+  .vc-type-slider.multi { transform: translateX(calc(100% + 0.35rem)); }
 
   /* CARD HEADER */
   .vc-card-header {
@@ -1465,81 +1438,6 @@
   .vc-loader.lg {
     width: 32px;
     height: 32px;
-  }
-
-  /* EVENT DROPDOWN */
-  .vc-event-select {
-    display: flex;
-    align-items: center;
-  }
-
-  .vc-dropdown {
-    position: relative;
-    /* allow menu to expand beyond container for long event titles; toggle kept compact */
-    min-width: 140px;
-  }
-
-  .vc-dropdown-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    background: rgba(15, 23, 42, 0.6);
-    border: 1px solid rgba(255,255,255,0.06);
-    color: #f8fafc;
-    border-radius: 10px;
-    cursor: pointer;
-    font-weight: 600;
-    min-width: 140px;
-    max-width: 260px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .vc-dropdown-menu {
-    position: absolute;
-    top: calc(100% + 8px);
-    left: 0;
-    /* moderate menu width for readability without being too wide */
-    min-width: 220px;
-    width: auto;
-    max-width: 340px;
-    max-height: 280px;
-    overflow: auto;
-    background: rgba(3,7,18,0.95);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 10px;
-    z-index: 99999;
-    padding: 6px;
-    box-shadow: 0 8px 30px rgba(2,6,23,0.6);
-  }
-
-  .vc-dropdown-item {
-    padding: 8px 12px;
-    cursor: pointer;
-    color: #cbd5e1;
-    border-radius: 8px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: block;
-  }
-
-  .vc-dropdown-item:hover {
-    background: rgba(255,255,255,0.03);
-    color: #fff;
-  }
-
-  .vc-dropdown-item:first-child {
-    font-style: italic;
-    color: #94a3b8;
-  }
-
-  .vc-dropdown-item.selected {
-    background: rgba(16, 185, 129, 0.12);
-    color: #e6ffef;
-    font-weight: 700;
   }
 
   /* ANIMATIONS */
