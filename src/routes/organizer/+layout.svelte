@@ -111,6 +111,7 @@
   let isMobileMenuOpen = false;
   let timeLeft = 0; 
   let timerInterval: any;
+  const currentYear = new Date().getFullYear();
   
   function formatTime(seconds: number): string {
     const mins = Math.floor(seconds / 60);
@@ -143,14 +144,12 @@
       return;
     }
     
-    // ✅ ฟังก์ชันคำนวณเวลาที่ปรับปรุงแล้ว
+    // ✅ ฟังก์ชันคำนวณเวลา
     const updateTimeLeft = () => {
       const expiryStr = localStorage.getItem('token_expiry');
       if (expiryStr) {
         let expiry = parseInt(expiryStr, 10);
         
-        // 🛠️ FIX: เช็คว่าถ้าค่า expiry เยอะผิดปกติ (มากกว่า 12 หลัก) แสดงว่าเป็น Milliseconds
-        // ให้หาร 1000 เพื่อแปลงเป็น Seconds ก่อน
         if (expiry.toString().length > 11) {
              expiry = Math.floor(expiry / 1000);
         }
@@ -221,14 +220,14 @@
           {formatTime(timeLeft)}
         </div>
 
-        <button class="logout-icon-btn desktop-only" on:click={handleLogout}>
+        <button class="logout-icon-btn desktop-only" aria-label={lang.logout} on:click={handleLogout}>
           <svg class="line-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
           </svg>
         </button>
 
         <div class="mobile-controls mobile-only">
-          <button class="mobile-icon-btn" on:click={() => (isMobileMenuOpen = !isMobileMenuOpen)}>
+          <button class="mobile-icon-btn" aria-label={lang.navigation} on:click={() => (isMobileMenuOpen = !isMobileMenuOpen)}>
             <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path>
             </svg>
@@ -239,7 +238,7 @@
   </header>
 
   {#if isMobileMenuOpen}
-    <div class="mobile-overlay" on:click={() => (isMobileMenuOpen = false)}></div>
+    <div class="mobile-overlay" role="button" tabindex="0" on:click={() => (isMobileMenuOpen = false)} on:keydown={(e: globalThis.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') isMobileMenuOpen = false; }}></div>
     <div class="mobile-drawer">
       <div class="drawer-header">
         <span class="brand-name">{lang.navigation}</span>
@@ -277,39 +276,30 @@
   <main class="page-content">
     <slot />
   </main>
+
+  <footer class="app-footer">
+  
+    <p class="copyright">© {currentYear} Cyber Geek. All rights reserved.</p>
+
+    <p class="credits">
+      Designed & Developed by <span class="dev-name">Cyber Geek Development</span>
+    </p>
+
+    <p class="credits" style="margin-top: 5px;">
+      Contact:
+      <a href="mailto:cybergeek.dev@proton.me" class="footer-email">
+        cybergeek.dev@proton.me
+      </a>
+    </p>
+  </footer>
 </div>
 
 <style>
-    /* ✅ Hide scrollbars for all browsers */
-    .app-container {
-      scrollbar-width: none !important; /* Firefox */
-      -ms-overflow-style: none !important; /* IE/Edge */
-    }
-    .page-content {
-      scrollbar-width: none !important; /* Firefox */
-      -ms-overflow-style: none !important; /* IE/Edge */
-    }
-    .app-container::-webkit-scrollbar {
-      width: 0 !important;
-      height: 0 !important;
-      display: none !important;
-      background: transparent !important;
-    }
-    .page-content::-webkit-scrollbar {
-      width: 0 !important;
-      height: 0 !important;
-      display: none !important;
-      background: transparent !important;
-    }
-    .app-container::-webkit-scrollbar-thumb {
-      background: transparent !important;
-      border: none !important;
-    }
-    .page-content::-webkit-scrollbar-thumb {
-      background: transparent !important;
-      border: none !important;
-    }
-  /* CSS Variables */
+  /* ✅ Hide scrollbars */
+  .app-container { scrollbar-width: none !important; -ms-overflow-style: none !important; }
+  .page-content { scrollbar-width: none !important; -ms-overflow-style: none !important; }
+  .app-container::-webkit-scrollbar, .page-content::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; background: transparent !important; }
+
   :global(:root) {
     --bg-deep: #0f172a;
     --bar-dark: #1e293b;
@@ -326,17 +316,20 @@
     font-family: "Inter", sans-serif;
     margin: 0;
     padding: 0;
+    overflow: hidden;
   }
 
-  /* ✅ Layout Structure: Allow scrolling */
+  /* ✅ Layout */
   .app-container {
     min-height: 100vh;
+    height: 100vh;
     display: flex;
     flex-direction: column;
-    overflow-y: auto !important; /* ให้ scroll ได้ */
-    height: 100vh;
+    overflow-y: auto !important;
+    position: relative;
   }
 
+  /* Header Styles */
   .header-bar {
     width: 100%;
     height: var(--nav-height);
@@ -348,43 +341,10 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
   }
-
-  .header-inner {
-    height: 100%;
-    display: flex;
-    align-items: center;
-    padding: 0 1.5rem;
-    justify-content: space-between;
-    gap: 1rem;
-  }
-
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-shrink: 0;
-  }
-
-  /* ✅ Logo CSS: No Border, Fit Image */
-  .logo-container {
-    width: 45px;
-    height: 45px;
-    background: transparent; 
-    box-shadow: none;
-    border-radius: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    padding: 0;
-  }
-
-  .brand-logo {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-  }
-
+  .header-inner { height: 100%; display: flex; align-items: center; padding: 0 1.5rem; justify-content: space-between; gap: 1rem; }
+  .brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .logo-container { width: 45px; height: 45px; background: transparent; display: flex; align-items: center; justify-content: center; flex-shrink: 0; padding: 0; }
+  .brand-logo { width: 100%; height: 100%; object-fit: contain; }
   .brand-name {
     font-weight: 800;
     font-size: 1.5rem;
@@ -392,46 +352,86 @@
     letter-spacing: 1px;
     background: linear-gradient(to right, #6ee7b7, #10b981);
     -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
     background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
     filter: drop-shadow(0 2px 10px rgba(16, 185, 129, 0.4));
     white-space: nowrap;
     cursor: default;
   }
-
-  /* ... (Navigation & Menu CSS omitted for brevity, logic remains same) ... */
+  
   .nav-menu { display: flex; gap: 6px; flex: 1; justify-content: center; align-items: center; }
   .menu-btn { background: transparent; border: 1px solid transparent; padding: 8px 14px; border-radius: 12px; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 0.85rem; transition: all 0.2s; }
   .menu-btn.active { color: var(--emerald-pri); background: #141d2b; border: 1px solid rgba(16, 185, 129, 0.2); box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.5); transform: translateY(1px) scale(0.97); }
   .menu-btn:hover:not(.active) { color: var(--text-pure); background: rgba(255, 255, 255, 0.03); }
+  
   .line-icon { width: 20px; height: 20px; flex-shrink: 0; stroke-width: 2; }
   .user-zone { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  
   .lang-toggle-btn { background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.08); padding: 6px 12px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 4px; font-size: 0.75rem; font-weight: 600; transition: all 0.2s; }
   .lang-toggle-btn:hover { border-color: var(--emerald-pri); background: rgba(16, 185, 129, 0.1); }
   .lang-option { color: var(--text-muted); transition: color 0.2s; }
   .lang-option.active { color: var(--emerald-pri); }
   .lang-divider { color: rgba(255, 255, 255, 0.2); }
+  
   .token-timer { padding: 6px 14px; background: rgba(0, 0, 0, 0.3); border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.08); color: var(--emerald-pri); font-family: monospace; font-weight: bold; font-size: 0.85rem; }
   .token-timer.warning { color: #ef4444; border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.1); animation: pulse 1s infinite; }
+  
   .logout-icon-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; padding: 8px; border-radius: 50%; transition: all 0.3s ease; }
   .logout-icon-btn:hover { background-color: rgba(239, 68, 68, 0.15); color: #ef4444; transform: scale(1.1); box-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
   
-  /* ✅ Content Wrapper */
   .page-content {
     margin-top: var(--nav-height);
-    flex: 1;
+    flex: 1 0 auto;
     width: 100%;
-    min-height: calc(100vh - var(--nav-height));
-    height: auto !important;
-    overflow-y: auto !important; /* ให้ scroll ได้ */
+    padding-bottom: 2rem;
   }
 
+  /* ✅ New Footer Styles matching requested format */
+  .app-footer {
+    flex-shrink: 0;
+    padding: 1.5rem 1rem;
+    margin-top: auto;
+    width: 100%;
+    text-align: center;
+    background: linear-gradient(to top, rgba(15, 23, 42, 1), rgba(30, 41, 59, 0.2));
+  }
+
+  /* .footer-divider removed (unused selector) */
+
+  .copyright {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin: 0.25rem 0;
+  }
+
+  .credits {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin: 0.25rem 0;
+  }
+
+  .dev-name {
+    color: var(--emerald-pri);
+    font-weight: 600;
+  }
+
+  .footer-email {
+    color: var(--teal-sec);
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .footer-email:hover {
+    text-decoration: underline;
+  }
+
+  /* Mobile Controls (Original) */
   .desktop-only { display: flex; }
   .mobile-only { display: none; }
   .mobile-controls { display: none; gap: 8px; align-items: center; }
   .mobile-icon-btn { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05); padding: 8px; border-radius: 10px; color: var(--text-muted); cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; }
   
-  /* Mobile Drawer Styles omitted for brevity but logic implies keeping them */
+  /* Mobile Drawer */
   .mobile-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); z-index: 2000; backdrop-filter: blur(5px); }
   .mobile-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 75vw; max-width: 280px; background: rgba(30, 41, 59, 0.98); backdrop-filter: blur(10px); z-index: 2001; padding: 1.25rem; box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5); display: flex; flex-direction: column; border-left: 1px solid rgba(255, 255, 255, 0.1); }
   .drawer-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 0.75rem; }
@@ -453,5 +453,4 @@
     .brand-name { font-size: 1rem; }
     .logo-container { width: 40px; height: 40px; }
   }
-  @keyframes pulse { 50% { opacity: 0.5; } }
 </style>

@@ -48,8 +48,8 @@
     th: {
       checkIn: "เช็คอิน",
       checkOut: "เช็คเอาท์",
-      typeSingle: "กิจกรรมหลายวัน",   // ✅ เพิ่ม
-      typeMulti: "กิจกรรมวันเดียว",    // ✅ เพิ่ม
+      typeSingle: "วันเดียว",
+      typeMulti: "หลายวัน",
       participantCheckIn: "เช็คอินผู้เข้าร่วม",
       participantCheckOut: "เช็คเอาท์ผู้เข้าร่วม",
       verifyParticipantCode: "ตรวจสอบรหัสผู้เข้าร่วมงาน",
@@ -73,8 +73,8 @@
     en: {
       checkIn: "Check In",
       checkOut: "Check Out",
-      typeSingle: "General Activity", // ✅ เพิ่ม
-      typeMulti: "Daily Check-in",    // ✅ เพิ่ม
+      typeSingle: "Single-day",
+      typeMulti: "Multi-day",
       participantCheckIn: "Participant Check-In",
       participantCheckOut: "Participant Check-Out",
       verifyParticipantCode: "Verify participant code",
@@ -547,7 +547,31 @@
             </svg>
             <span>{verifyActionMode === "checkout" ? (currentLang === "th" ? "Auto Check Out" : "Auto Check Out") : (currentLang === "th" ? "Auto Check In" : "Auto Check In")}</span>
           </div>
-          <button class="vc-switch" class:checkout={verifyActionMode === "checkout"} class:on={autoCheckIn} on:click={() => { autoCheckIn = !autoCheckIn; clearPins(); }}>
+          <button
+            class="vc-switch"
+            class:checkout={verifyActionMode === "checkout"}
+            class:on={autoCheckIn}
+            on:click={() => { autoCheckIn = !autoCheckIn; clearPins(); }}
+            aria-pressed={autoCheckIn}
+            title={
+              autoCheckIn
+                ? (verifyActionMode === 'checkout'
+                    ? (currentLang === 'th' ? 'ปิด Auto Check Out' : 'Disable Auto Check Out')
+                    : (currentLang === 'th' ? 'ปิด Auto Check In' : 'Disable Auto Check In'))
+                : (verifyActionMode === 'checkout'
+                    ? (currentLang === 'th' ? 'เปิด Auto Check Out' : 'Enable Auto Check Out')
+                    : (currentLang === 'th' ? 'เปิด Auto Check In' : 'Enable Auto Check In'))
+            }
+            aria-label={
+              autoCheckIn
+                ? (verifyActionMode === 'checkout'
+                    ? (currentLang === 'th' ? 'ปิด Auto Check Out' : 'Disable Auto Check Out')
+                    : (currentLang === 'th' ? 'ปิด Auto Check In' : 'Disable Auto Check In'))
+                : (verifyActionMode === 'checkout'
+                    ? (currentLang === 'th' ? 'เปิด Auto Check Out' : 'Enable Auto Check Out')
+                    : (currentLang === 'th' ? 'เปิด Auto Check In' : 'Enable Auto Check In'))
+            }
+          >
             <span class="vc-switch-knob"></span>
           </button>
         </div>
@@ -719,7 +743,7 @@
     grid-template-columns: 1fr 1fr;
     gap: 0.5rem;
     background: rgba(15, 23, 42, 0.5);
-    padding: 0.5rem;
+    padding: 0.5rem; /* Padding นี้ต้องถูกนำไปคิดใน Slider */
     border-radius: 16px;
     margin-bottom: 2rem;
   }
@@ -759,7 +783,8 @@
     position: absolute;
     top: 0.5rem;
     left: 0.5rem;
-    width: calc(50% - 0.25rem);
+    /* ✅ แก้ไข: ลบ Padding (0.5rem) และครึ่งหนึ่งของ Gap (0.25rem) ออกจาก 50% */
+    width: calc(50% - 0.5rem - 0.25rem); 
     height: calc(100% - 1rem);
     background: linear-gradient(135deg, #10b981, #059669);
     border-radius: 12px;
@@ -768,21 +793,28 @@
   }
 
   .vc-action-slider.checkout {
+    /* ✅ แก้ไข: เลื่อนไป 100% ของตัวเอง + Gap (0.5rem) */
     transform: translateX(calc(100% + 0.5rem));
     background: linear-gradient(135deg, #f59e0b, #d97706);
   }
 
   /* ✅ Type Selector (New) */
   .vc-type-selector {
+    /* layout vars */
+    --vc-type-gap: 0.5rem;
+    --vc-type-pad-vertical: 0.45rem;
+    --vc-type-pad-horizontal: 0.7rem; /* ค่านี้สำคัญ */
+    
     position: relative;
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 0.5rem;
+    gap: var(--vc-type-gap);
     background: rgba(15, 23, 42, 0.3);
-    padding: 0.35rem;
+    padding: var(--vc-type-pad-vertical) var(--vc-type-pad-horizontal);
     border-radius: 12px;
     margin-bottom: 1.5rem;
     border: 1px solid rgba(255,255,255,0.05);
+    overflow: hidden;
   }
   
   .vc-type-tab {
@@ -805,19 +837,58 @@
   
   .vc-type-tab.active { color: #fff; }
   
-  .vc-type-slider {
+ .vc-type-slider {
     position: absolute;
-    top: 0.35rem;
-    left: 0.35rem;
-    width: calc(50% - 0.175rem);
-    height: calc(100% - 0.7rem);
+    top: var(--vc-type-pad-vertical);
+    left: var(--vc-type-pad-horizontal);
+    
+    /* ✅ แก้ไข: คำนวณความกว้างให้พอดีโดยลบ Padding แนวนอนออกด้วย */
+    width: calc(50% - var(--vc-type-pad-horizontal) - (var(--vc-type-gap) / 2));
+    
+    height: calc(100% - (var(--vc-type-pad-vertical) * 2));
     background: #334155;
     border-radius: 8px;
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: 1;
   }
-  
-  .vc-type-slider.multi { transform: translateX(calc(100% + 0.35rem)); }
+
+  .vc-type-slider.multi { 
+    /* ✅ แก้ไข: เลื่อนไป 100% ของตัวเอง + Gap */
+    transform: translateX(calc(100% + var(--vc-type-gap))); 
+  }
+
+  .vc-type-tab {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: var(--vc-type-pad-vertical) var(--vc-type-pad-horizontal);
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: #64748b;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s;
+    overflow: hidden; /* ensure long labels do not push out */
+  }
+
+  .vc-type-tab span {
+    display: inline-block;
+    max-width: calc(100% - 28px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .vc-type-tab svg {
+    flex: 0 0 18px;
+    width: 18px;
+    height: 18px;
+  }
 
   /* CARD HEADER */
   .vc-card-header {

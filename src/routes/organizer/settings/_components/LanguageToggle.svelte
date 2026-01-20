@@ -1,12 +1,21 @@
 === settings/./_components/LanguageToggle.svelte ===
 <script lang="ts">
   import { appState } from '../../_lib/stores/appState';
-  
+
   function toggleLanguage() {
     appState.update(state => ({
       ...state,
       currentLang: state.currentLang === 'th' ? 'en' : 'th'
     }));
+    if (typeof localStorage !== 'undefined') {
+      const newLang = $appState.currentLang === 'th' ? 'en' : 'th';
+      localStorage.setItem('app_language', newLang);
+    }
+  }
+
+  function setLanguage(lang: 'th' | 'en') {
+    appState.update(state => ({ ...state, currentLang: lang }));
+    if (typeof localStorage !== 'undefined') localStorage.setItem('app_language', lang);
   }
 </script>
 
@@ -24,7 +33,7 @@
     <button 
       class="lang-option" 
       class:active={$appState.currentLang === 'th'}
-      on:click={() => appState.setLanguage('th')}
+      on:click={() => setLanguage('th')}
     >
       <div class="lang-icon">🇹🇭</div>
       <div class="lang-name">ไทย</div>
@@ -33,7 +42,7 @@
     <button 
       class="lang-option" 
       class:active={$appState.currentLang === 'en'}
-      on:click={() => appState.setLanguage('en')}
+      on:click={() => setLanguage('en')}
     >
       <div class="lang-icon">🇬🇧</div>
       <div class="lang-name">English</div>
@@ -42,7 +51,7 @@
 </div>
 
 <style>
-  .language-toggle { }
+  .language-toggle { padding: 0; }
   .toggle-header { margin-bottom: 1rem; }
   .toggle-title { font-size: 1rem; font-weight: 600; color: var(--text); margin: 0 0 0.25rem; }
   .toggle-desc { font-size: 0.875rem; color: var(--text-muted); margin: 0; }

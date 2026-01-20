@@ -6,6 +6,7 @@
   
   // ✅ 1. ตั้งค่า Base URL ให้ถูกต้อง
   const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://158.108.102.14:8001").replace(/\/$/, "");
+  const IMAGE_PLACEHOLDER = 'https://placehold.co/400x200/94a3b8/ffffff?text=Loading...';
   const api = axios.create({
     baseURL: API_BASE_URL,
     timeout: 30000,
@@ -106,7 +107,11 @@
   $: paginatedEvents = events.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
   $: totalPages = Math.ceil(events.length / itemsPerPage);
   
-  onMount(async () => { await fetchEvents(); });
+  onMount(() => {
+    // Fetch events shortly after mount. Avoid using requestIdleCallback
+    // to prevent browser Intervention console messages.
+    setTimeout(() => fetchEvents(), 200);
+  });
 
   function resolveImageUrl(img: string | null) {
     if (!img) return null;
@@ -117,6 +122,17 @@
         return `${cleanBase}${cleanPath}`;
     }
     return `${cleanBase}api/${cleanPath}`;
+  }
+
+  function handleImgError(e: any) {
+    const img = (e && e.currentTarget) ? (e.currentTarget as HTMLImageElement) : null;
+    if (img) img.src = 'https://placehold.co/400x200/1e293b/64748b?text=Image+Error';
+  }
+
+  function overlayKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
+      closeDetailModal();
+    }
   }
 
   function extractTime(iso: string) {
@@ -297,6 +313,8 @@
       fetchPendingCountsForEvents(); 
       fetchHolidaysForEvents();
       fetchRewardConfigsForEvents(); 
+      // Ensure lazy images are observed after events have been rendered
+      setTimeout(() => lazyLoadImages(), 50);
     } catch (error) { console.error('Error fetching events:', error);
     } 
     finally { eventsLoading = false;
@@ -336,6 +354,36 @@
   function getParticipantPercentage(event: Event): number { if (!event.totalSlots) return 0; return Math.min((event.usedSlots / event.totalSlots) * 100, 100);
   }
   function getPendingPercentage(event: Event): number { if (!event.pendingCount || !event.totalSlots) return 0; return Math.min((event.pendingCount / event.totalSlots) * 100, 100);
+  }
+
+  // Lazy-load helper for images: use `lazy-img` class and `data-src` attribute on <img>
+  function lazyLoadImages() {
+    if (typeof window === 'undefined') return;
+    const imgs = Array.from(document.querySelectorAll('img.lazy-img')) as HTMLImageElement[];
+    if (!imgs.length) return;
+    if (!('IntersectionObserver' in window)) {
+      imgs.forEach(img => {
+        const s = img.dataset.src;
+        if (s) img.src = s;
+      });
+      return;
+    }
+
+    const io = new IntersectionObserver((entries, observer) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        const img = entry.target as HTMLImageElement;
+        const src = img.dataset.src;
+        if (src) {
+          img.src = src;
+          img.removeAttribute('data-src');
+          img.classList.add('loaded');
+        }
+        observer.unobserve(img);
+      });
+    }, { rootMargin: '200px' });
+
+    imgs.forEach(i => io.observe(i));
   }
   
   async function handleViewDetails(event: Event) {
@@ -434,20 +482,20 @@
         {#each paginatedEvents as event (event.id)}
           <div class="glass-card">
             <div class="card-img-wrapper">
-              <img 
-                src={event.image || 'https://placehold.co/400x200/1e293b/64748b?text=No+Image'} 
-                alt={event.title} 
-                class="card-img" 
-                loading="lazy" 
-                on:error={(e) => { e.currentTarget.src = 'https://placehold.co/400x200/1e293b/64748b?text=Image+Error';
-                }} 
+              <img
+                class="card-img lazy-img"
+                data-src={event.image || 'https://placehold.co/400x200/1e293b/64748b?text=No+Image'}
+                src={IMAGE_PLACEHOLDER}
+                alt={event.title}
+                decoding="async"
+                on:error={handleImgError}
               />
               <div class="status-badge-overlay">
                 <span class="status-badge" class:status-active={event.status === 'Active'} class:status-closed={event.status === 'Closed'} class:status-draft={event.status === 'Draft'}>{translateStatus(event.status)}</span>
               </div>
             </div>
             <div class="card-body">
-              <div class="card-header"><h3>{event.title}</h3></div>
+              <div class="card-header"><h3 title={event.title}>{event.title}</h3></div>
               <div class="card-content-area">
                 {#if event.description}<p class="event-description-short">{event.description.substring(0, 80)}{event.description.length > 80 ?
                  '...' : ''}</p>{/if}
@@ -506,12 +554,12 @@
       {#if totalPages > 1}
         <div class="pagination-wrapper">
           <div class="pagination-controls">
-            <button class="page-btn" on:click={prevPage} disabled={currentPage === 1}><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg></button>
+            <button class="page-btn" aria-label="Previous page" on:click={prevPage} disabled={currentPage === 1}><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg></button>
             <div class="page-select-wrapper">
               <button class="page-indicator-box" on:click|stopPropagation={() => (showPageDropdown = !showPageDropdown)}><span class="current-page">{currentPage}</span><span class="sep">/</span><span class="total-page">{totalPages}</span><svg class="dropdown-arrow" class:flipped={showPageDropdown} width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 9l-7 7-7-7"></path></svg></button>
               {#if showPageDropdown}<div class="page-dropdown-list">{#each Array(totalPages) as _, i}<button class="page-option" class:active={currentPage === i + 1} on:click={() => jumpToPage(i + 1)}>Page {i + 1}</button>{/each}</div>{/if}
             </div>
-            <button class="page-btn" on:click={nextPage} disabled={currentPage === totalPages}><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>
+            <button class="page-btn" aria-label="Next page" on:click={nextPage} disabled={currentPage === totalPages}><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>
           </div>
           <div class="page-info">{lang.showing} {(currentPage - 1) * itemsPerPage + 1} - {Math.min(currentPage * itemsPerPage, events.length)} {lang.of} {events.length}</div>
         </div>
@@ -521,24 +569,24 @@
 </div>
 
 {#if showDetailModal && selectedEvent}
-  <div class="modal-overlay" on:click={closeDetailModal}>
-    <div class="modal-container detail-modal" on:click|stopPropagation>
-      <div class="modal-header"><h2>{lang.eventDetails}</h2><button class="close-modal-btn" on:click={closeDetailModal}><svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>
+      <div class="modal-overlay" role="button" tabindex="0" on:click={closeDetailModal} on:keydown={overlayKeydown}>
+    <div class="modal-container detail-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="0" on:click|stopPropagation on:keydown|stopPropagation>
+      <div class="modal-header"><h2 id="modal-title">{lang.eventDetails}</h2><button class="close-modal-btn" aria-label="Close details" on:click={closeDetailModal}><svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>
       <div class="modal-body">
         {#if detailLoading}
           <div class="loading-state"><svg class="spinner" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10" stroke-width="2" opacity="0.25" /><path d="M12 2a10 10 0 0 1 10 10" stroke-width="2" stroke-linecap="round" /></svg></div>
         {:else}
           {#if selectedEvent.image}
-            <div class="detail-image"><img src={selectedEvent.image} alt={selectedEvent.title} /><div class="image-overlay"><span class="status-badge" class:status-active={selectedEvent.status === 'Active'} class:status-closed={selectedEvent.status === 'Closed'} class:status-draft={selectedEvent.status === 'Draft'}>{translateStatus(selectedEvent.status)}</span></div></div>
+            <div class="detail-image"><img src={selectedEvent.image} alt={selectedEvent.title} on:error={handleImgError} /><div class="image-overlay"><span class="status-badge" class:status-active={selectedEvent.status === 'Active'} class:status-closed={selectedEvent.status === 'Closed'} class:status-draft={selectedEvent.status === 'Draft'}>{translateStatus(selectedEvent.status)}</span></div></div>
           {/if}
         
           <div class="info-section">
             <div class="section-header"><svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><h3>{lang.basicInfo}</h3></div>
-            <div class="info-grid"><div class="info-item"><label>{lang.title}</label><p>{selectedEvent.title}</p></div><div class="info-item full-width"><label>{lang.description}</label><p>{selectedEvent.description || '-'}</p></div><div class="info-item"><label>{lang.location}</label><p>{selectedEvent.location}</p></div><div class="info-item"><label>{lang.eventType}</label><p>{getEventTypeLabel(selectedEvent)}</p></div>{#if selectedEvent.distanceKm}<div class="info-item"><label>{lang.distance}</label><p>{selectedEvent.distanceKm} {lang.km}</p></div>{/if}</div>
+            <div class="info-grid"><div class="info-item"><div class="info-label">{lang.title}</div><p>{selectedEvent.title}</p></div><div class="info-item full-width"><div class="info-label">{lang.description}</div><p>{selectedEvent.description || '-'}</p></div><div class="info-item"><div class="info-label">{lang.location}</div><p>{selectedEvent.location}</p></div><div class="info-item"><div class="info-label">{lang.eventType}</div><p>{getEventTypeLabel(selectedEvent)}</p></div>{#if selectedEvent.distanceKm}<div class="info-item"><div class="info-label">{lang.distance}</div><p>{selectedEvent.distanceKm} {lang.km}</p></div>{/if}</div>
           </div>
           <div class="info-section">
             <div class="section-header"><svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg><h3>{lang.dateTime}</h3></div>
-            <div class="info-grid"><div class="info-item"><label>{lang.startDate}</label><p>{formatDate(selectedEvent.startDate)}</p></div><div class="info-item"><label>{lang.endDate}</label><p>{formatDate(selectedEvent.endDate)}</p></div><div class="info-item"><label>{lang.startTime}</label><p>{selectedEvent.startTime}</p></div><div class="info-item"><label>{lang.endTime}</label><p>{selectedEvent.endTime}</p></div></div>
+            <div class="info-grid"><div class="info-item"><div class="info-label">{lang.startDate}</div><p>{formatDate(selectedEvent.startDate)}</p></div><div class="info-item"><div class="info-label">{lang.endDate}</div><p>{formatDate(selectedEvent.endDate)}</p></div><div class="info-item"><div class="info-label">{lang.startTime}</div><p>{selectedEvent.startTime}</p></div><div class="info-item"><div class="info-label">{lang.endTime}</div><p>{selectedEvent.endTime}</p></div></div>
           </div>
           
           {#if getEventHolidayDisplay(selectedEvent)}
@@ -579,7 +627,7 @@
           </div>
         {/if}
       </div>
-      <div class="modal-footer"><button class="modal-btn btn-secondary" on:click={closeDetailModal}>{lang.close}</button><button class="modal-btn btn-primary" on:click={() => { closeDetailModal(); handleEdit(selectedEvent.id); }}><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>{lang.edit}</button></div>
+      <div class="modal-footer"><button class="modal-btn btn-secondary" on:click={closeDetailModal}>{lang.close}</button><button class="modal-btn btn-primary" on:click={() => { if (selectedEvent) { closeDetailModal(); handleEdit(selectedEvent.id); } }}><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>{lang.edit}</button></div>
     </div>
   </div>
 {/if}
@@ -687,7 +735,7 @@
   .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
   .info-item { display: flex; flex-direction: column; gap: 0.25rem; }
   .info-item.full-width { grid-column: 1 / -1; }
-  .info-item label { font-size: 0.75rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
+  .info-label { font-size: 0.75rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
   .info-item p { font-size: 0.95rem; color: #f8fafc; margin: 0; line-height: 1.6; }
   .stats-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1rem; }
   .stat-card { display: flex; align-items: center; gap: 0.75rem; padding: 1rem; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 10px; }
@@ -721,5 +769,16 @@
     .rewards-grid { grid-template-columns: 1fr; }
     .modal-footer { flex-direction: column; }
     .modal-btn { width: 100%; justify-content: center; }
+  }
+
+  /* Truncate long event titles in the card view to a single line with ellipsis */
+  .card-header h3 {
+    margin: 0 0 0.75rem 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 </style>

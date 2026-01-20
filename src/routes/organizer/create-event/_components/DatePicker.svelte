@@ -13,14 +13,15 @@
 </script>
 
 <div class="date-picker">
-  <label class="label">
-    {label}
-    {#if required}
-      <span class="required">*</span>
-    {/if}
-  </label>
-  
-  <div class="date-inputs">
+  <fieldset class="date-fieldset">
+    <legend class="label">
+      {label}
+      {#if required}
+        <span class="required">*</span>
+      {/if}
+    </legend>
+
+    <div class="date-inputs">
     <input
       type="number"
       placeholder={lang === 'th' ? 'วัน' : 'Day'}
@@ -52,9 +53,10 @@
     />
   </div>
   
-  {#if error}
-    <span class="error-message">{error}</span>
-  {/if}
+    {#if error}
+      <span class="error-message">{error}</span>
+    {/if}
+  </fieldset>
 </div>
 
 <style>

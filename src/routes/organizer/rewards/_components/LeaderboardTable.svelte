@@ -9,13 +9,13 @@
   $: lang = $appState.currentLang;
   
   function getTierColor(tier: string) {
-    const colors = {
+    const colors: Record<string, string> = {
       gold: '#fbbf24',
       silver: '#d1d5db',
       bronze: '#cd7f32',
       platinum: '#e5e7eb'
     };
-    return colors[tier.toLowerCase()] || '#64748b';
+    return colors[tier?.toLowerCase?.()] || '#64748b';
   }
   
   function getTierIcon(tier: string) {
@@ -28,13 +28,15 @@
     <thead>
       <tr>
         <th class="col-checkbox">
-          <input type="checkbox" on:change={(e) => {
-            if (e.target.checked) {
+          <input type="checkbox" on:change={(e: Event) => {
+            const target = e.currentTarget as HTMLInputElement;
+            if (target && target.checked) {
               leaderboard.forEach(entry => selectedUsers.add(entry.userId));
             } else {
               selectedUsers.clear();
             }
-            selectedUsers = selectedUsers;
+            // reassign to trigger Svelte reactivity for Set
+            selectedUsers = new Set(selectedUsers);
           }} />
         </th>
         <th class="col-rank">{lang === 'th' ? 'อันดับ' : 'Rank'}</th>

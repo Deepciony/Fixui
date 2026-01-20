@@ -62,20 +62,20 @@
     {#if proof.status === 'pending'}
       {#if canModerate}
         <div class="proof-actions">
-          <button class="btn-reject" on:click={onReject}>
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-            {lang === 'th' ? 'ปฏิเสธ' : 'Reject'}
-          </button>
+              <button class="btn-reject" on:click={onReject}>
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                {lang === 'th' ? 'ปฏิเสธ' : 'Reject'}
+              </button>
           
-          <button class="btn-approve" on:click={onApprove}>
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-            </svg>
-            {lang === 'th' ? 'อนุมัติ' : 'Approve'}
-          </button>
-        </div>
+              <button class="btn-approve" on:click={onApprove}>
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+                {lang === 'th' ? 'อนุมัติ' : 'Approve'}
+              </button>
+            </div>
       {:else}
         <div class="muted-note">{lang === 'th' ? 'เฉพาะผู้จัดงานสามารถอนุมัติหรือปฏิเสธได้' : 'Only organizers can approve or reject'}</div>
       {/if}
@@ -140,12 +140,12 @@
   
   .proof-description { font-size: 0.875rem; color: var(--text); margin: 0; line-height: 1.6; }
   
-  .proof-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-  .btn-reject, .btn-approve { display: flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.625rem; border-radius: 6px; font-size: 0.875rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
-  .btn-reject { background: #fee2e2; border: 1px solid #fecaca; color: #ef4444; }
-  .btn-reject:hover { background: #fecaca; }
-  .btn-approve { background: #d1fae5; border: 1px solid #a7f3d0; color: #10b981; }
-  .btn-approve:hover { background: #a7f3d0; }
+  .proof-actions { display: grid; grid-template-columns: 2fr 1fr; gap: 0.75rem; }
+  .btn-reject, .btn-approve { display: flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem; border-radius: 10px; font-size: 0.95rem; font-weight: 700; cursor: pointer; transition: all 0.2s; border: none; }
+  .btn-reject { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.2); color: #ef4444; }
+  .btn-reject:hover { background: rgba(239, 68, 68, 0.12); color: white; }
+  .btn-approve { background: linear-gradient(135deg, #10b981, #059669); color: white; box-shadow: 0 6px 18px rgba(16,185,129,0.18); }
+  .btn-approve:hover { transform: translateY(-2px); }
   .btn-reject svg, .btn-approve svg { width: 16px; height: 16px; }
   
   .points-badge { display: flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem; background: #d1fae5; border: 1px solid #10b981; border-radius: 8px; font-weight: 600; color: #10b981; }

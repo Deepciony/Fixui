@@ -13,6 +13,21 @@
     isOpen = !isOpen;
   }
 
+  function handleTriggerKeydown(e: KeyboardEvent) {
+    const key = e.key;
+    if (key === 'Enter' || key === ' ' || key === 'Spacebar') {
+      e.preventDefault();
+      toggleDropdown();
+    }
+  }
+
+  function handleDropdownKeydown(e: KeyboardEvent) {
+    const key = e.key;
+    if (key === 'Escape') {
+      isOpen = false;
+    }
+  }
+
   function selectDate(value: string) {
     selectedHoliday = value;
     isOpen = false;
@@ -79,19 +94,27 @@
         </div>
       {:else}
         <div class="hs-dropdown-wrapper">
-          <div class="hs-trigger" on:click={toggleDropdown}>
-            <input 
-              type="text" 
-              value={selectedHoliday ? getHolidayLabel(selectedHoliday) : ""} 
-              placeholder="เลือกวันที่หยุดจากช่วงเวลากิจกรรม" 
-              class="hs-input" 
-              readonly 
+          <div
+            class="hs-trigger"
+            role="button"
+            tabindex="0"
+            aria-expanded={isOpen}
+            on:click={toggleDropdown}
+            on:keydown={handleTriggerKeydown}
+          >
+            <input
+              type="text"
+              value={selectedHoliday ? getHolidayLabel(selectedHoliday) : ""}
+              placeholder="เลือกวันที่หยุดจากช่วงเวลากิจกรรม"
+              class="hs-input"
+              readonly
+              aria-readonly="true"
             />
             <span class="hs-arrow">▼</span>
           </div>
           
           {#if isOpen}
-            <div class="hs-dropdown" on:click|stopPropagation>
+            <div class="hs-dropdown" role="listbox" tabindex="0" on:click|stopPropagation on:keydown={handleDropdownKeydown}>
               {#if options.length === 0}
                 <div class="hs-empty">ไม่มีวันที่ให้เลือก</div>
               {:else}

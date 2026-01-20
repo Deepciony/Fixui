@@ -121,7 +121,7 @@
 </div>
 
 <style>
-  .security-settings { }
+  .security-settings { padding: 0; }
   .section-title { font-size: 1.5rem; font-weight: 700; color: var(--text); margin: 0 0 1.5rem; }
   
   .form-fields { display: flex; flex-direction: column; gap: 1.5rem; margin-bottom: 2rem; }

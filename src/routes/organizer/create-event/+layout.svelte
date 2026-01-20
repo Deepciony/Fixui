@@ -95,6 +95,8 @@
       basicInformation: "ข้อมูลพื้นฐาน", eventName: "ชื่อกิจกรรม", description: "รายละเอียด", location: "สถานที่",
       eventTypeTitle: "ประเภทกิจกรรม", singleDay: "วันเดียว", multiDay: "หลายวัน",
       singleDayDesc: "กิจกรรมจัดขึ้นในวันเดียว เช็คอินได้ 1 ครั้ง", multiDayDesc: "กิจกรรมหลายวัน สามารถเช็คอินได้หลายครั้ง",
+      singleDayNote: "📌 วันเดียว: วันสิ้นสุด = วันเริ่มต้น (ปรับอัตโนมัติ)",
+      saving: "กำลังบันทึก...",
       maxCheckinsPerUser: "จำนวนเช็คอินสูงสุดต่อคน", checkinTimes: "ครั้ง",
       dateAndTime: "วันที่และเวลา", startDateLabel: "วันที่เริ่ม", endDateLabel: "วันที่สิ้นสุด",
       startTimeLabel: "เวลาเริ่ม", endTimeLabel: "เวลาสิ้นสุด",
@@ -122,6 +124,8 @@
       basicInformation: "Basic Information", eventName: "Event Name", description: "Description", location: "Location",
       eventTypeTitle: "Event Type", singleDay: "Single Day", multiDay: "Multi-Day",
       singleDayDesc: "Event held in one day, check-in once", multiDayDesc: "Multi-day event, multiple check-ins allowed",
+      singleDayNote: "📌 Single day: End date = Start date (auto-applies)",
+      saving: "Saving...",
       maxCheckinsPerUser: "Max Check-ins Per User", checkinTimes: "times",
       dateAndTime: "Date & Time", startDateLabel: "Start Date", endDateLabel: "End Date",
       startTimeLabel: "Start Time", endTimeLabel: "End Time",
@@ -150,6 +154,7 @@
   interface RewardTierConfig {
     reward_name: string;         // ชื่อรางวัล
     required_completions: number | null; // จำนวนรอบที่ต้องวิ่งเพื่อได้รางวัลนี้
+    time_period_days?: number | string; // optional compatibility with backend reward objects
   }
   
   let formData = {
@@ -175,6 +180,7 @@
   let validationErrors = new Set<string>();
   let activeDropdown: string | null = null;
   let fileInput: HTMLInputElement;
+  let isSubmitting = false;
 
   const days = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'));
   const months = ["01","02","03","04","05","06","07","08","09","10","11","12"];
@@ -263,7 +269,7 @@
 
   async function fetchEventDetails(id: string) {
     try {
-      Swal.fire({ title: 'Loading...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+      Swal.fire({ title: 'Loading...', allowOutsideClick: false, didOpen: () => Swal.showLoading(), background: '#1e293b', color: '#fff', showConfirmButton: false });
       const res = await api.get(`/api/events/${id}`);
       const data = res.data;
 
@@ -465,6 +471,28 @@
     }
   }
 
+  function handlePreviewImgError(e: Event) {
+    const img = e.currentTarget as HTMLImageElement | null;
+    if (img) img.src = 'https://placehold.co/600x400/1e293b/64748b?text=Image+Not+Found';
+  }
+
+  function handleImgCardKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      triggerFileInput();
+    }
+  }
+
+  function handleTriggerKeydown(e: KeyboardEvent, name: string) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggleDropdown(name);
+    }
+    if (e.key === 'Escape') {
+      activeDropdown = null;
+    }
+  }
+
   function addSpecificDate() {
     if (formData.selectedHoliday) {
       if (!formData.specificDates.includes(formData.selectedHoliday)) {
@@ -523,8 +551,11 @@
   }
 
   async function submit() {
+    if (isSubmitting) return; // Prevent duplicate submissions
+    isSubmitting = true;
     if (!validate()) {
       Swal.fire({ title: lang.error, text: lang.fillAllFields, icon: 'error', background: '#1e293b', color: '#fff', confirmButtonColor: '#10b981' });
+      isSubmitting = false;
       return;
     }
 
@@ -537,7 +568,7 @@
     }
     
     try {
-      Swal.fire({ title: 'Saving...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+      Swal.fire({ title: lang.saving, allowOutsideClick: false, didOpen: () => Swal.showLoading(), background: '#1e293b', color: '#fff', showConfirmButton: false });
 
       // 1. Upload Image
       let finalImageUrl = formData.imagePreview;
@@ -998,6 +1029,8 @@
         color: '#fff', 
         confirmButtonColor: '#10b981' 
       });
+    } finally {
+      isSubmitting = false;
     }
   }
   
@@ -1019,7 +1052,7 @@
   }
 </script>
 
-<div class="ce-wrapper" on:click={() => (activeDropdown = null)}>
+<div class="ce-wrapper" on:click={() => (activeDropdown = null)} role="button" tabindex="0" on:keydown={(e) => { if (e.key === 'Escape') activeDropdown = null }}>
   <div class="ce-container">
     <div class="ce-header">
       <h2 class="ce-title">{editingEventId ? lang.editEvent : lang.createNewEvent}</h2>
@@ -1031,17 +1064,24 @@
           </div>
         {/if}
         <div class="ce-header-actions">
-          <button class="ce-btn-cancel" on:click={cancel}>{lang.cancel}</button>
-          <button class="ce-btn-save" on:click={submit}>{editingEventId ? lang.update : lang.publish}</button>
+          <button class="ce-btn-cancel" on:click={cancel} disabled={isSubmitting}>{lang.cancel}</button>
+          <button class="ce-btn-save" on:click={submit} disabled={isSubmitting} aria-busy={isSubmitting}>
+            {#if isSubmitting}
+              <svg class="btn-spinner" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10" stroke-width="2" stroke="currentColor" fill="none" opacity="0.15"/><path d="M22 12a10 10 0 00-10-10" stroke-width="2" stroke="currentColor" stroke-linecap="round" fill="none"/></svg>
+              <span class="btn-label">{lang.saving}</span>
+            {:else}
+              <span class="btn-label">{editingEventId ? lang.update : lang.publish}</span>
+            {/if}
+          </button>
         </div>
       </div>
     </div>
 
     <div class="ce-grid-layout">
-      <div class="ce-card ce-img-card" class:has-img={formData.imagePreview} on:click|stopPropagation={triggerFileInput}>
+        <div class="ce-card ce-img-card" class:has-img={formData.imagePreview} on:click|stopPropagation={triggerFileInput} role="button" tabindex="0" on:keydown|stopPropagation={handleImgCardKeydown}>
         <input type="file" accept="image/*" bind:this={fileInput} on:change={handleImageUpload} hidden />
         {#if formData.imagePreview}
-          <img src={formData.imagePreview} alt="Preview" class="ce-preview-img" on:error={(e) => e.currentTarget.src='https://placehold.co/600x400/1e293b/64748b?text=Image+Not+Found'} />
+            <img src={formData.imagePreview} alt="Preview" class="ce-preview-img" on:error={handlePreviewImgError} />
           <div class="ce-overlay"><span>{lang.changeImage}</span></div>
         {:else}
           <div class="ce-upload-placeholder"><div class="ce-icon-upload"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg></div><span>{lang.uploadEventBanner}</span></div>
@@ -1066,30 +1106,30 @@
           </button>
         </div>
         {#if formData.eventType === "multi_day"}
-          <div class="ce-checkin-section"><span class="ce-checkin-label">{lang.maxCheckinsPerUser}</span><div class="ce-checkin-stepper"><button type="button" class="ce-stepper-btn" on:click={() => { if (formData.maxCheckinsPerUser > 1) formData.maxCheckinsPerUser--; }} disabled={formData.maxCheckinsPerUser <= 1}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 12H6"></path></svg></button><div class="ce-stepper-value">{formData.maxCheckinsPerUser}</div><button type="button" class="ce-stepper-btn" on:click={() => { if (formData.maxCheckinsPerUser < 365) formData.maxCheckinsPerUser++; }} disabled={formData.maxCheckinsPerUser >= 365}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"></path></svg></button><span class="ce-stepper-unit">{lang.checkinTimes}</span></div></div>
+          <div class="ce-checkin-section"><span class="ce-checkin-label">{lang.maxCheckinsPerUser}</span><div class="ce-checkin-stepper"><button type="button" class="ce-stepper-btn" aria-label="Decrease max check-ins" on:click={() => { if (formData.maxCheckinsPerUser > 1) formData.maxCheckinsPerUser--; }} disabled={formData.maxCheckinsPerUser <= 1}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 12H6"></path></svg></button><div class="ce-stepper-value">{formData.maxCheckinsPerUser}</div><button type="button" class="ce-stepper-btn" aria-label="Increase max check-ins" on:click={() => { if (formData.maxCheckinsPerUser < 365) formData.maxCheckinsPerUser++; }} disabled={formData.maxCheckinsPerUser >= 365}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"></path></svg></button><span class="ce-stepper-unit">{lang.checkinTimes}</span></div></div>
         {/if}
       </div>
 
       <div class="ce-card ce-config-card">
         <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg><span>{lang.dateAndTime}</span></div>
-        <div class="ce-input-group"><label>{lang.startDateLabel} <span class="ce-req">*</span></label><div class="ce-date-row" class:error={validationErrors.has("startDate")}><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("sDay")}><input type="text" value={formData.sDay} placeholder={lang.dayPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "sDay"}<div class="ce-options" on:click|stopPropagation>{#each days as d}<button class="ce-opt" on:click|stopPropagation={() => selectOption("sDay", d)}>{d}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-2"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("sMonth")}><input type="text" value={translateMonth(formData.sMonth)} placeholder={lang.monthPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "sMonth"}<div class="ce-options" on:click|stopPropagation>{#each months as m, idx}<button class="ce-opt" on:click|stopPropagation={() => selectOption("sMonth", m)}>{displayMonths[idx]}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("sYear")}><input type="text" value={formData.sYear} placeholder={lang.yearPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "sYear"}<div class="ce-options" on:click|stopPropagation>{#each years as y}<button class="ce-opt" on:click|stopPropagation={() => selectOption("sYear", y)}>{y}</button>{/each}</div>{/if}</div></div></div>
-        <div class="ce-input-group"><label>{lang.endDateLabel} <span class="ce-req">*</span></label>
+        <div class="ce-input-group"><label for="sDayInput">{lang.startDateLabel} <span class="ce-req">*</span></label><div class="ce-date-row" class:error={validationErrors.has("startDate")}><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" role="button" tabindex="0" on:click|stopPropagation={() => toggleDropdown("sDay")} on:keydown|stopPropagation={(e) => handleTriggerKeydown(e, "sDay")}><input id="sDayInput" type="text" value={formData.sDay} placeholder={lang.dayPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "sDay"}<div class="ce-options" role="listbox" tabindex="0" on:click|stopPropagation on:keydown|stopPropagation={(e) => { if (e.key === 'Escape') activeDropdown = null }}>{#each days as d}<button class="ce-opt" on:click|stopPropagation={() => selectOption("sDay", d)}>{d}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-2"><div class="ce-trigger" role="button" tabindex="0" on:click|stopPropagation={() => toggleDropdown("sMonth")} on:keydown|stopPropagation={(e) => handleTriggerKeydown(e, "sMonth")}><input id="sMonthInput" type="text" value={translateMonth(formData.sMonth)} placeholder={lang.monthPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "sMonth"}<div class="ce-options" role="listbox" tabindex="0" on:click|stopPropagation on:keydown|stopPropagation={(e) => { if (e.key === 'Escape') activeDropdown = null }}>{#each months as m, idx}<button class="ce-opt" on:click|stopPropagation={() => selectOption("sMonth", m)}>{displayMonths[idx]}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" role="button" tabindex="0" on:click|stopPropagation={() => toggleDropdown("sYear")} on:keydown|stopPropagation={(e) => handleTriggerKeydown(e, "sYear")}><input id="sYearInput" type="text" value={formData.sYear} placeholder={lang.yearPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "sYear"}<div class="ce-options" role="listbox" tabindex="0" on:click|stopPropagation on:keydown|stopPropagation={(e) => { if (e.key === 'Escape') activeDropdown = null }}>{#each years as y}<button class="ce-opt" on:click|stopPropagation={() => selectOption("sYear", y)}>{y}</button>{/each}</div>{/if}</div></div></div>
+        <div class="ce-input-group"><label for="eDayInput">{lang.endDateLabel} <span class="ce-req">*</span></label>
         {#if formData.eventType === "single_day"}
           <div class="ce-input-group">
             <input type="text" value={`${formData.eDay} ${translateMonth(formData.eMonth)} ${formData.eYear}`} class="ce-input-dis" disabled style="background: rgba(15, 23, 42, 0.3); cursor: not-allowed;" />
-            <div class="ce-helper-text">📌 วันเดียว: วันสิ้นสุด = วันเริ่มต้น (ปรับอัตโนมัติ)</div>
+            <div class="ce-helper-text">{lang.singleDayNote}</div>
           </div>
         {:else}
-          <div class="ce-date-row" class:error={validationErrors.has("endDate")}><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("eDay")}><input type="text" value={formData.eDay} placeholder={lang.dayPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "eDay"}<div class="ce-options" on:click|stopPropagation>{#each days as d}<button class="ce-opt" on:click|stopPropagation={() => selectOption("eDay", d)}>{d}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-2"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("eMonth")}><input type="text" value={translateMonth(formData.eMonth)} placeholder={lang.monthPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "eMonth"}<div class="ce-options" on:click|stopPropagation>{#each months as m, idx}<button class="ce-opt" on:click|stopPropagation={() => selectOption("eMonth", m)}>{displayMonths[idx]}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("eYear")}><input type="text" value={formData.eYear} placeholder={lang.yearPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "eYear"}<div class="ce-options" on:click|stopPropagation>{#each years as y}<button class="ce-opt" on:click|stopPropagation={() => selectOption("eYear", y)}>{y}</button>{/each}</div>{/if}</div></div>
+          <div class="ce-date-row" class:error={validationErrors.has("endDate")}><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" role="button" tabindex="0" on:click|stopPropagation={() => toggleDropdown("eDay")} on:keydown|stopPropagation={(e) => handleTriggerKeydown(e, "eDay")}><input id="eDayInput" type="text" value={formData.eDay} placeholder={lang.dayPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "eDay"}<div class="ce-options" role="listbox" tabindex="0" on:click|stopPropagation on:keydown|stopPropagation={(e) => { if (e.key === 'Escape') activeDropdown = null }}>{#each days as d}<button class="ce-opt" on:click|stopPropagation={() => selectOption("eDay", d)}>{d}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-2"><div class="ce-trigger" role="button" tabindex="0" on:click|stopPropagation={() => toggleDropdown("eMonth")} on:keydown|stopPropagation={(e) => handleTriggerKeydown(e, "eMonth")}><input id="eMonthInput" type="text" value={translateMonth(formData.eMonth)} placeholder={lang.monthPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "eMonth"}<div class="ce-options" role="listbox" tabindex="0" on:click|stopPropagation on:keydown|stopPropagation={(e) => { if (e.key === 'Escape') activeDropdown = null }}>{#each months as m, idx}<button class="ce-opt" on:click|stopPropagation={() => selectOption("eMonth", m)}>{displayMonths[idx]}</button>{/each}</div>{/if}</div><div class="ce-dd-wrap flex-1-5"><div class="ce-trigger" role="button" tabindex="0" on:click|stopPropagation={() => toggleDropdown("eYear")} on:keydown|stopPropagation={(e) => handleTriggerKeydown(e, "eYear")}><input id="eYearInput" type="text" value={formData.eYear} placeholder={lang.yearPlaceholder} class="ce-input-dis" readonly /><span class="ce-arrow">▼</span></div>{#if activeDropdown === "eYear"}<div class="ce-options" role="listbox" tabindex="0" on:click|stopPropagation on:keydown|stopPropagation={(e) => { if (e.key === 'Escape') activeDropdown = null }}>{#each years as y}<button class="ce-opt" on:click|stopPropagation={() => selectOption("eYear", y)}>{y}</button>{/each}</div>{/if}</div></div>
         {/if}
         </div>
         
         <div class="ce-dual-row">
           <div class="ce-input-group">
-            <label>{lang.startTimeLabel} <span class="ce-req">*</span></label>
+            <label for="startTimeInput">{lang.startTimeLabel} <span class="ce-req">*</span></label>
             <div class="ce-dd-wrap">
-              <div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("startTime")}>
-                <input 
+              <div class="ce-trigger" role="button" tabindex="0" on:click|stopPropagation={() => toggleDropdown("startTime")} on:keydown|stopPropagation={(e) => handleTriggerKeydown(e, "startTime")}>
+                <input id="startTimeInput"
                   type="text" 
                   value={formData.startTime} 
                   placeholder="08:00" 
@@ -1101,7 +1141,7 @@
                 <span class="ce-arrow">▼</span>
               </div>
               {#if activeDropdown === "startTime"}
-                <div class="ce-options time-scroll" on:click|stopPropagation>
+                <div class="ce-options time-scroll" role="listbox" tabindex="0" on:click|stopPropagation on:keydown|stopPropagation={(e) => { if (e.key === 'Escape') activeDropdown = null }}>
                   {#each times as t}
                     <button class="ce-opt" on:click|stopPropagation={() => selectOption("startTime", t)}>{t}</button>
                   {/each}
@@ -1110,10 +1150,10 @@
             </div>
           </div>
           <div class="ce-input-group">
-            <label>{lang.endTimeLabel} <span class="ce-req">*</span></label>
+            <label for="endTimeInput">{lang.endTimeLabel} <span class="ce-req">*</span></label>
             <div class="ce-dd-wrap">
-              <div class="ce-trigger" on:click|stopPropagation={() => toggleDropdown("endTime")}>
-                <input 
+              <div class="ce-trigger" role="button" tabindex="0" on:click|stopPropagation={() => toggleDropdown("endTime")} on:keydown|stopPropagation={(e) => handleTriggerKeydown(e, "endTime")}>
+                <input id="endTimeInput"
                   type="text" 
                   value={formData.endTime} 
                   placeholder="16:00" 
@@ -1125,7 +1165,7 @@
                 <span class="ce-arrow">▼</span>
               </div>
               {#if activeDropdown === "endTime"}
-                <div class="ce-options time-scroll" on:click|stopPropagation>
+                <div class="ce-options time-scroll" role="listbox" tabindex="0" on:click|stopPropagation on:keydown|stopPropagation={(e) => { if (e.key === 'Escape') activeDropdown = null }}>
                   {#each times as t}
                     <button class="ce-opt" on:click|stopPropagation={() => selectOption("endTime", t)}>{t}</button>
                   {/each}
@@ -1139,7 +1179,7 @@
 
       <div class="ce-card ce-config-card">
         <div class="ce-card-head"><svg class="ce-icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg><span>{lang.capacityAndSettings}</span></div>
-        <div class="ce-dual-row"><div class="ce-input-group"><label>{lang.capacityLabel} <span class="ce-req">*</span></label><input type="number" bind:value={formData.totalSlots} placeholder="100" class="ce-input" class:error={validationErrors.has("totalSlots")} min="1" /></div><div class="ce-input-group"><label>{lang.distanceLabel}</label><input type="number" bind:value={formData.distanceKm} placeholder="5.0" class="ce-input" min="0" step="0.1" /></div></div>
+        <div class="ce-dual-row"><div class="ce-input-group"><label for="totalSlotsInput">{lang.capacityLabel} <span class="ce-req">*</span></label><input id="totalSlotsInput" type="number" bind:value={formData.totalSlots} placeholder="100" class="ce-input" class:error={validationErrors.has("totalSlots")} min="1" /></div><div class="ce-input-group"><label for="distanceKmInput">{lang.distanceLabel}</label><input id="distanceKmInput" type="number" bind:value={formData.distanceKm} placeholder="5.0" class="ce-input" min="0" step="0.1" /></div></div>
       </div>
 
       {#if formData.eventType === "multi_day"}
@@ -1169,8 +1209,8 @@
         </div>
 
         <div class="ce-input-group">
-          <label>{lang.totalRewardsLabel}</label>
-          <input type="number" bind:value={formData.totalRewards} placeholder="300" class="ce-input" min="1" />
+          <label for="totalRewardsInput">{lang.totalRewardsLabel}</label>
+          <input id="totalRewardsInput" type="number" bind:value={formData.totalRewards} placeholder="300" class="ce-input" min="1" />
           <div class="ce-helper-text">จำนวนคนทั้งหมดที่จะได้รับรางวัล (เช่น 300 คนแรก)</div>
         </div>
 
@@ -1183,17 +1223,17 @@
             <div class="ce-tier-header">
               <span class="ce-tier-label">{lang.tierLabel} {idx + 1}</span>
               {#if formData.rewardTiers.length > 1}
-                <button type="button" class="ce-btn-remove-tier" on:click={() => removeRewardTier(idx)}>×</button>
+                <button type="button" class="ce-btn-remove-tier" aria-label={`Remove reward tier ${idx + 1}`} on:click={() => removeRewardTier(idx)}>×</button>
               {/if}
             </div>
             <div class="ce-dual-row">
               <div class="ce-input-group">
-                <label>{lang.rewardNameLabel}</label>
-                <input type="text" bind:value={tier.reward_name} placeholder="เหรียญทอง, เสื้อยืด" class="ce-input" />
+                <label for={`reward-name-${idx}`}>{lang.rewardNameLabel}</label>
+                <input id={`reward-name-${idx}`} type="text" bind:value={tier.reward_name} placeholder="เหรียญทอง, เสื้อยืด" class="ce-input" />
               </div>
               <div class="ce-input-group">
-                <label>{lang.requirementLabel}</label>
-                <input type="number" bind:value={tier.required_completions} placeholder="10" class="ce-input" min="1" />
+                <label for={`reward-req-${idx}`}>{lang.requirementLabel}</label>
+                <input id={`reward-req-${idx}`} type="number" bind:value={tier.required_completions} placeholder="10" class="ce-input" min="1" />
               </div>
             </div>
             <div class="ce-tier-hint">
@@ -1233,6 +1273,11 @@
   .ce-btn-cancel:hover { border-color: var(--ce-danger); color: var(--ce-danger); background: rgba(239, 68, 68, 0.1); }
   .ce-btn-save { background: linear-gradient(135deg, var(--ce-primary), var(--ce-primary-hover)); color: white; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3); }
   .ce-btn-save:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4); }
+  .ce-btn-save:disabled, .ce-btn-cancel:disabled { opacity: 0.65; cursor: not-allowed; transform: none; box-shadow: none; }
+  .ce-btn-save { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; }
+  .btn-spinner { width: 16px; height: 16px; color: var(--ce-primary); flex-shrink: 0; animation: ce-spin 1s linear infinite; }
+  @keyframes ce-spin { to { transform: rotate(360deg); } }
+  .btn-label { display: inline-block; }
   .ce-grid-layout { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
   .ce-card { background: var(--ce-card-bg); border: 1px solid var(--ce-border); border-radius: 20px; padding: 1.5rem; transition: all 0.3s; }
   .ce-card:hover { border-color: rgba(16, 185, 129, 0.2); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); }
@@ -1292,26 +1337,15 @@
   .ce-dd-wrap { position: relative; flex: 1; }
   .ce-dd-wrap.flex-1-5 { flex: 1.5; }
   .ce-dd-wrap.flex-2 { flex: 2; }
-  .ce-dd-wrap.flex-full { flex: 100%; } 
+  /* removed unused .ce-dd-wrap.flex-full selector */
   .ce-trigger { position: relative; cursor: pointer; }
   .ce-arrow { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%); color: var(--ce-text-muted); font-size: 0.75rem; pointer-events: none; }
   .ce-options { position: absolute; top: calc(100% + 0.5rem); left: 0; right: 0; max-height: 240px; overflow-y: auto; background: var(--ce-card-bg); border: 1px solid var(--ce-border); border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); z-index: 100; padding: 0.5rem; }
   .ce-options.time-scroll { max-height: 300px; }
   .ce-opt { width: 100%; padding: 0.75rem 1rem; background: transparent; border: none; text-align: left; color: var(--ce-text); cursor: pointer; border-radius: 8px; transition: all 0.2s; font-size: 0.95rem; }
   .ce-opt:hover { background: rgba(16, 185, 129, 0.1); color: var(--ce-primary); }
-  .ce-opt-empty { padding: 1rem; text-align: center; color: var(--ce-text-muted); font-size: 0.9rem; }
-  .ce-holiday-options { display: flex; flex-direction: column; gap: 0.75rem; }
-  .ce-radio-option { display: flex; align-items: center; gap: 0.75rem; padding: 1rem; background: rgba(15, 23, 42, 0.5); border: 1px solid var(--ce-border); border-radius: 12px; cursor: pointer; transition: all 0.2s; }
-  .ce-radio-option:hover { border-color: rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.05); }
-  .ce-radio-option input[type="radio"] { width: 20px; height: 20px; accent-color: var(--ce-primary); cursor: pointer; }
-  .ce-radio-option span { color: var(--ce-text); font-weight: 500; }
-  .ce-specific-dates { margin-top: 1rem; }
-  .ce-date-add-row { display: flex; gap: 0.75rem; }
-  .ce-btn-add { padding: 0.75rem 1.5rem; background: var(--ce-primary); border: none; border-radius: 12px; color: white; font-weight: 600; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
-  .ce-btn-add:hover { background: var(--ce-primary-hover); }
-  .ce-date-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
-  .ce-chip { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 20px; color: var(--ce-primary); font-size: 0.9rem; }
-  .ce-chip button { width: 20px; height: 20px; background: rgba(239, 68, 68, 0.1); border: none; border-radius: 50%; color: var(--ce-danger); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; line-height: 1; }
+    /* Removed several unused local selectors to silence svelte-check warnings.
+      If these are later needed, reintroduce them in the component where used. */
   .ce-reward-tier { padding: 1.25rem; background: rgba(15, 23, 42, 0.5); border: 1px solid var(--ce-border); border-radius: 12px; margin-bottom: 1rem; }
   .ce-tier-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
   .ce-tier-label { font-weight: 600; color: var(--ce-primary); }

@@ -24,7 +24,7 @@
     <div class="modal-content" on:click|stopPropagation on:keypress role="button" tabindex="0">
       <div class="modal-header">
         <h3>{lang === 'th' ? 'ส่งข้อความ' : 'Send Message'}</h3>
-        <button class="btn-close" on:click={onClose}>
+        <button class="btn-close" aria-label={lang === 'th' ? 'ปิด' : 'Close'} on:click={onClose}>
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>

@@ -8,6 +8,9 @@
   export let canRemove: boolean = true;
   
   $: lang = $appState.currentLang;
+  const nameId = `reward-name-${index}`;
+  const reqId = `reward-req-${index}`;
+  const quotaId = `reward-quota-${index}`;
 </script>
 
 <div class="tier-card">
@@ -16,8 +19,8 @@
       {lang === 'th' ? 'ระดับ' : 'Tier'} {index + 1}
     </h4>
     {#if canRemove}
-      <button class="btn-remove" on:click={onRemove} type="button">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <button class="btn-remove" on:click={onRemove} type="button" aria-label={lang === 'th' ? 'ลบระดับรางวัล' : 'Remove tier'}>
+        <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
         </svg>
       </button>
@@ -26,18 +29,18 @@
   
   <div class="tier-fields">
     <div class="field">
-      <label>{lang === 'th' ? 'ชื่อรางวัล' : 'Reward Name'} <span class="required">*</span></label>
-      <input type="text" bind:value={tier.name} placeholder={lang === 'th' ? 'เช่น Gold' : 'e.g. Gold'} />
+      <label for={nameId}>{lang === 'th' ? 'ชื่อรางวัล' : 'Reward Name'} <span class="required">*</span></label>
+      <input id={nameId} type="text" bind:value={tier.name} placeholder={lang === 'th' ? 'เช่น Gold' : 'e.g. Gold'} />
     </div>
     
     <div class="field">
-      <label>{lang === 'th' ? 'เงื่อนไข (รอบ)' : 'Requirement'} <span class="required">*</span></label>
-      <input type="number" min="1" bind:value={tier.requirement} placeholder="0" />
+      <label for={reqId}>{lang === 'th' ? 'เงื่อนไข (รอบ)' : 'Requirement'} <span class="required">*</span></label>
+      <input id={reqId} type="number" min="1" bind:value={tier.requirement} placeholder="0" />
     </div>
     
     <div class="field">
-      <label>{lang === 'th' ? 'โควต้า' : 'Quota'}</label>
-      <input type="number" min="0" bind:value={tier.quota} placeholder={lang === 'th' ? 'ไม่จำกัด' : 'Unlimited'} />
+      <label for={quotaId}>{lang === 'th' ? 'โควต้า' : 'Quota'}</label>
+      <input id={quotaId} type="number" min="0" bind:value={tier.quota} placeholder={lang === 'th' ? 'ไม่จำกัด' : 'Unlimited'} />
     </div>
   </div>
 </div>

@@ -17,7 +17,7 @@ export const load = async ({ url }: Parameters<LayoutLoad>[0]) => {
 
     // No tokens = not authenticated
     if (!accessToken || !refreshToken) {
-      console.warn('🔒 No auth tokens found - redirecting to login');
+      // Removed noisy console message to avoid spamming logs in any environment
       throw redirect(303, '/auth/login');
     }
     

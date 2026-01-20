@@ -25,7 +25,8 @@
 
   // --- Language ---
   import { writable } from "svelte/store";
-  export const appLanguage = writable("th");
+  type Lang = 'th' | 'en';
+  export const appLanguage = writable<Lang>("th");
   if (typeof localStorage !== "undefined") {
     const saved = localStorage.getItem("app_language");
     if (saved === "th" || saved === "en") appLanguage.set(saved);
@@ -33,7 +34,7 @@
 
   appLanguage.subscribe((lang) => {
     if (typeof localStorage !== "undefined") {
-      localStorage.setItem("app_language", lang);
+      localStorage.setItem("app_language", lang as string);
     }
   });
 
@@ -58,20 +59,17 @@
     { th: "ฝ่ายจัดงานกิจกรรม", en: "Event Management" },
   ];
 
-  import { derived } from "svelte/store";
-  let currentLang = "th";
-  $: appLanguage.subscribe((v) => {
-    currentLang = v;
-  });
+  let currentLang: Lang = 'th';
+  $: currentLang = $appLanguage;
   $: lang = translations[currentLang];
   $: nameTitles = titleOptions[currentLang];
   $: roleLabelOptions = roleOptions.map((r) => ({
     value: r.value,
-    label: r.label[currentLang],
+    label: r.label[currentLang as Lang],
   }));
   $: departmentLabelOptions = departmentOptions.map((d) => ({
     value: d.en,
-    label: d[currentLang],
+    label: d[currentLang as Lang],
   }));
   $: selectedDepartmentLabel =
     departmentLabelOptions.find((d) => d.value === userData.department)
@@ -341,9 +339,10 @@
     <div class="card-content">
       <div class="field-row">
         <div class="form-field" style="flex: 0 0 120px;">
-          <label>{lang.title}</label>
+          <label for="title-select">{lang.title}</label>
           <div class="custom-select">
             <button
+              id="title-select"
               class="select-btn"
               class:active={showTitleDropdown}
               on:click={toggleTitleDropdown}
@@ -380,9 +379,10 @@
         </div>
 
         <div class="form-field" style="flex: 1;">
-          <label>{lang.firstName}</label>
+          <label for="first-name">{lang.firstName}</label>
           <div class="input-wrapper">
             <input
+              id="first-name"
               type="text"
               bind:value={userData.firstName}
               placeholder={lang.enterFirstName}
@@ -392,9 +392,10 @@
       </div>
 
       <div class="form-field">
-        <label>{lang.lastName}</label>
+        <label for="last-name">{lang.lastName}</label>
         <div class="input-wrapper">
           <input
+            id="last-name"
             type="text"
             bind:value={userData.lastName}
             placeholder={lang.enterLastName}
@@ -403,9 +404,9 @@
       </div>
 
       <div class="form-field">
-        <label>{lang.emailAddress}</label>
+        <label for="email-address">{lang.emailAddress}</label>
         <div class="input-wrapper locked">
-          <input type="email" value={userData.email} disabled />
+          <input id="email-address" type="email" value={userData.email} disabled />
           <svg
             class="lock-icon"
             width="16"
@@ -443,9 +444,10 @@
     </div>
     <div class="card-content">
       <div class="form-field" style="position:relative;">
-        <label>{currentLang === "th" ? "ฝ่ายงาน" : "Department"}</label>
+        <label for="department-select">{currentLang === "th" ? "ฝ่ายงาน" : "Department"}</label>
         <div class="custom-select">
           <button
+            id="department-select"
             class="select-btn"
             class:active={showDepartmentDropdown}
             on:click={(e) => {
@@ -503,13 +505,13 @@
     <div class="card-content">
       <div class="form-field">
         <div class="password-row">
-          <label>{lang.password}</label>
+          <label for="password-display">{lang.password}</label>
           <a href="/auth/forgot-password" class="change-link"
             >{lang.changePassword}</a
           >
         </div>
         <div class="input-wrapper locked">
-          <input type="password" value="••••••••••••" disabled />
+          <input id="password-display" type="password" value="••••••••••••" disabled />
           <svg
             class="lock-icon"
             width="16"
@@ -918,22 +920,5 @@
     }
   }
 
-  /* ==================== LANGUAGE BUTTON ==================== */
-  .lang-btn {
-    padding: 0.5rem 1.2rem;
-    border: none;
-    border-radius: 8px;
-    background: #334155;
-    color: #f8fafc;
-    font-weight: 600;
-    font-size: 0.95rem;
-    cursor: pointer;
-    transition: background 0.2s;
-    outline: none;
-  }
-  .lang-btn.active,
-  .lang-btn:active {
-    background: #10b981;
-    color: #fff;
-  }
+  /* removed unused .lang-btn styles (no longer referenced) */
 </style>

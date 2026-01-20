@@ -43,6 +43,11 @@
     formData = { ...$eventForm } as any;
   });
 
+  function handleSummaryImgError(e: Event) {
+    const img = e.currentTarget as HTMLImageElement;
+    img.src = '/image 7.png';
+  }
+
   function formatDate(day: string, month: string, year: string) {
     if (!day || !month || !year) return '';
     const monthNames = lang === 'th'
@@ -277,9 +282,9 @@
     </div>
 
     {#if formData.imagePreview}
-      <div class="ce-summary-image">
-        <img src={formData.imagePreview} alt="Event banner" on:error={(e) => { e.currentTarget.src = '/image 7.png'; }} />
-      </div>
+        <div class="ce-summary-image">
+          <img src={formData.imagePreview} alt="Event banner" on:error={handleSummaryImgError} />
+        </div>
     {/if}
 
     <div class="ce-summary-grid">

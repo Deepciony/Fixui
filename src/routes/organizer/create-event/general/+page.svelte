@@ -48,6 +48,11 @@
       reader.readAsDataURL(file);
     }
   }
+
+  function ce_handleImgError(e: Event) {
+    const img = e.currentTarget as HTMLImageElement;
+    img.src = '/image 7.png';
+  }
   
   function ce_setEventType(type: 'single_day' | 'multi_day') {
     ce_formData.eventType = type;
@@ -107,7 +112,7 @@
         src={ce_formData.imagePreview}
         alt="Preview"
         class="ce-preview-img"
-        on:error={(e) => { e.currentTarget.src = '/image 7.png'; }}
+        on:error={ce_handleImgError}
       />
       <div class="ce-overlay">
         <span>{lang === 'th' ? 'เปลี่ยนรูปภาพ' : 'Change Image'}</span>

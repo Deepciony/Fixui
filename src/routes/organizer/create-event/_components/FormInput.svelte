@@ -10,10 +10,11 @@
   export let min: number | undefined = undefined;
   export let max: number | undefined = undefined;
   export let step: number | string | undefined = undefined;
+  const _id = `form-input-${Math.random().toString(36).slice(2,9)}`;
 </script>
 
 <div class="form-input">
-  <label class="label">
+  <label class="label" for={_id}>
     {label}
     {#if required}
       <span class="required">*</span>
@@ -21,6 +22,7 @@
   </label>
   
   <input
+    id={_id}
     {type}
     {placeholder}
     {disabled}

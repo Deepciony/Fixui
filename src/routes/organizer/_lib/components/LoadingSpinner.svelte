@@ -1,6 +1,6 @@
 <script lang="ts">
   export let size: 'sm' | 'md' | 'lg' = 'md';
-  export let color: string = 'var(--primary)';
+  export let color: string = 'var(--ce-primary, #10b981)';
   
   const sizes = {
     sm: '20px',

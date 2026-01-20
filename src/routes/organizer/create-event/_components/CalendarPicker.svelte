@@ -3,8 +3,8 @@
   import { appState } from '../../_lib/stores/appState';
   
   export let selectedDates: Date[] = [];
-  export let minDate: Date | null = null;
-  export let maxDate: Date | null = null;
+  export const minDate: Date | null = null;
+  export const maxDate: Date | null = null;
   
   $: lang = $appState.currentLang;
   
@@ -78,14 +78,14 @@
 
 <div class="calendar-picker">
   <div class="calendar-header">
-    <button class="nav-btn" on:click={previousMonth} type="button">
-      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <button class="nav-btn" on:click={previousMonth} type="button" aria-label="Previous month">
+      <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
       </svg>
     </button>
     <span class="month-label">{monthName}</span>
-    <button class="nav-btn" on:click={nextMonth} type="button">
-      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <button class="nav-btn" on:click={nextMonth} type="button" aria-label="Next month">
+      <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
       </svg>
     </button>

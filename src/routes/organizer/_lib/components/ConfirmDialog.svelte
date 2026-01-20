@@ -13,13 +13,31 @@
       onCancel();
     }
   }
+
+  function handleBackdropKeydown(e: KeyboardEvent) {
+    const key = e.key;
+    if (key === 'Enter' || key === ' ' || key === 'Spacebar') {
+      const target = e.target as EventTarget;
+      if (target === e.currentTarget) {
+        e.preventDefault();
+        onCancel();
+      }
+    }
+  }
 </script>
 
 {#if show}
-  <div class="modal-backdrop" on:click={handleBackdropClick}>
-    <div class="modal-content">
+  <div
+    class="modal-backdrop"
+    role="button"
+    tabindex="0"
+    aria-label="Close dialog"
+    on:click={handleBackdropClick}
+    on:keydown={handleBackdropKeydown}
+  >
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
       <div class="modal-header">
-        <h3 class="modal-title">{title}</h3>
+        <h3 id="confirm-dialog-title" class="modal-title">{title}</h3>
         <button class="close-btn" on:click={onCancel} aria-label="Close">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path

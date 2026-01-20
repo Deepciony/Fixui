@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, afterUpdate, onDestroy, tick } from 'svelte';
   import axios from 'axios';
   import Swal from 'sweetalert2';
   import { endpoints } from '../_lib/api/endpoints'; //
@@ -15,6 +15,8 @@
   if (!(import.meta.env.VITE_API_BASE_URL && import.meta.env.VITE_API_BASE_URL.trim() !== "")) {
     console.warn('[rewards] VITE_API_BASE_URL not set — falling back to', API_BASE_URL);
   }
+  const IMAGE_PLACEHOLDER = 'https://placehold.co/400x200/94a3b8/ffffff?text=Loading...';
+  const BADGE_PLACEHOLDER = 'https://placehold.co/64x64/94a3b8/ffffff?text=';
   
   function showApiError(err: any, defaultMsg = 'Server error') {
     console.error(err);
@@ -56,6 +58,7 @@
     end_date: string;
     image: string;
     status: string;
+    is_active?: boolean;
     max_participants?: number;
     distance_km?: number;
   }
@@ -109,6 +112,27 @@
     reward_tiers: RewardTier[];
   }
   
+  // Reward definitions (API /rewards)
+  interface RewardRead {
+    id: number;
+    name: string;
+    description?: string | null;
+    badge_image_url?: string | null;
+    required_completions: number;
+    time_period_days: number;
+    created_at?: string;
+    updated_at?: string;
+  }
+
+  interface UserRewardRead {
+    id: number;
+    user_id: number;
+    reward_id: number;
+    earned_at: string;
+    earned_month: number;
+    earned_year: number;
+  }
+  
   interface Statistics {
     totalParticipants: number;
     totalRewarded: number;
@@ -158,6 +182,8 @@
       pending: "รอดำเนินการ",
       finalized: "ยืนยันแล้ว",
       notFinalized: "ยังไม่ยืนยัน",
+      enabled: "เปิดใช้งาน",
+      disabled: "ปิดใช้งาน",
       totalParticipants: "ผู้เข้าร่วมทั้งหมด",
       totalRewarded: "ได้รับรางวัลแล้ว",
       totalQualified: "มีสิทธิ์รับรางวัล",
@@ -200,6 +226,7 @@
       tier: "ระดับ",
       noConfigTitle: "ไม่พบการตั้งค่ารางวัล",
       noConfigDesc: "กิจกรรมนี้ยังไม่ได้ตั้งค่า Leaderboard กรุณาตั้งค่าในหน้าแก้ไขกิจกรรมก่อน",
+      requiredCompletions: "จำนวนครั้งที่ต้องการ",
     },
     en: {
       rewardManagement: "Reward Management",
@@ -231,6 +258,8 @@
       pending: "Pending",
       finalized: "Finalized",
       notFinalized: "Not Finalized",
+      enabled: "Enabled",
+      disabled: "Disabled",
       totalParticipants: "Total Participants",
       totalRewarded: "Rewarded",
       totalQualified: "Qualified",
@@ -273,6 +302,7 @@
       tier: "Tier",
       noConfigTitle: "No Reward Configuration",
       noConfigDesc: "This event has no leaderboard configuration. Please configure it in the event settings.",
+      requiredCompletions: "Required completions",
     }
   };
   
@@ -286,6 +316,9 @@
   let rewardConfig: RewardConfig | null = null;
   let rewards: RewardEntry[] = [];
   let filteredRewards: RewardEntry[] = [];
+  // list of reward definitions from GET /rewards
+  let rewardDefinitions: RewardRead[] = [];
+  const USE_MOCK_REWARDS = !!import.meta.env.DEV;
   let statistics: Statistics = {
     totalParticipants: 0,
     totalRewarded: 0,
@@ -306,6 +339,10 @@
   let currentPage = 1;
   const itemsPerPage = 15;
   let showPageDropdown = false;
+  // Events pagination (for events view)
+  let eventsPage = 1;
+  const eventsPerPage = 9;
+  let showEventsPageDropdown = false;
   
   // ===== Modals & Actions =====
   let showExportMenu = false;
@@ -320,6 +357,10 @@
     currentPage * itemsPerPage
   );
   $: totalPages = Math.ceil(filteredRewards.length / itemsPerPage);
+
+  // Events pagination computed
+  $: paginatedEvents = events.slice((eventsPage - 1) * eventsPerPage, eventsPage * eventsPerPage);
+  $: totalEventsPages = Math.max(1, Math.ceil(events.length / eventsPerPage));
   
   // ===== Helper Functions =====
   function getStatusLabel(entry: RewardEntry): string {
@@ -363,16 +404,34 @@
   }
   
   function calculateStatistics() {
-    statistics.totalParticipants = rewards.length;
-    statistics.totalRewarded = rewards.filter(r => r.rewarded_at).length;
-    statistics.totalQualified = rewards.filter(r => r.qualified_at && !r.rewarded_at).length;
-    statistics.totalPending = rewards.filter(r => !r.qualified_at).length;
-    
+    // compute into a new object then reassign to trigger Svelte reactivity
+    const newStats: Statistics = {
+      totalParticipants: rewards.length,
+      totalRewarded: rewards.filter(r => r.rewarded_at).length,
+      totalQualified: rewards.filter(r => r.qualified_at && !r.rewarded_at).length,
+      totalPending: rewards.filter(r => !r.qualified_at).length,
+      averageCompletions: 0,
+      topCompletion: 0
+    };
+
     const completions = rewards.map(r => r.total_completions);
-    statistics.averageCompletions = completions.length > 0
+    newStats.averageCompletions = completions.length > 0
       ? Math.round(completions.reduce((a, b) => a + b, 0) / completions.length * 10) / 10
       : 0;
-    statistics.topCompletion = Math.max(...completions, 0);
+    newStats.topCompletion = Math.max(...completions, 0);
+
+    // debug: show computed values
+    console.debug('[rewards] calculateStatistics', {
+      rewardsCount: rewards.length,
+      rewarded: newStats.totalRewarded,
+      qualified: newStats.totalQualified,
+      pending: newStats.totalPending,
+      average: newStats.averageCompletions,
+      top: newStats.topCompletion
+    });
+
+    // reassign to ensure Svelte notices the change
+    statistics = newStats;
   }
   
   // ===== Data Loading =====
@@ -394,9 +453,13 @@
         end_date: e.end_date || e.event_end_date,
         image: e.banner_image_url || e.cover_image_url || e.image || '',
         status: e.is_active ? 'Active' : 'Closed',
+        is_active: !!e.is_active,
         max_participants: e.max_participants,
         distance_km: e.distance_km,
       }));
+      // After updating events, wait for DOM update then initialize lazy loader
+      await tick();
+      lazyLoadImages();
     } catch (err) {
       console.error('Failed to load events', err);
       Swal.fire({ icon: 'error', title: lang.error, text: 'Could not load events' });
@@ -442,6 +505,7 @@
              created_at: r.created_at,
              updated_at: r.updated_at
           }));
+            if (import.meta.env.DEV) console.debug('[rewards] loaded entries', { count: rewards.length, first: rewards[0] });
       } else {
           // กรณีไม่มี Config อาจจะยังไม่เคยตั้งค่า
           console.warn("No reward config found for this event.");
@@ -449,6 +513,7 @@
 
       calculateStatistics();
       applyFilters();
+      if (import.meta.env.DEV) console.debug('[rewards] after selectEventForRewards', { view, rewardsLength: rewards.length, filteredLength: filteredRewards.length, statistics });
       view = 'leaderboard';
     } catch (err) {
       console.error('Error loading reward data', err);
@@ -482,6 +547,7 @@
       return true;
     });
     currentPage = 1;
+    if (import.meta.env.DEV) console.debug('[rewards] applyFilters', { rewardsLength: rewards.length, filteredLength: filteredRewards.length, searchQuery, selectedStatus, selectedTier });
   }
   
   function resetFilters() {
@@ -679,10 +745,187 @@
   function jumpToPage(page: number) {
     currentPage = page;
   }
+
+  // Events pagination handlers
+  function prevEventsPage() { if (eventsPage > 1) eventsPage--; }
+  function nextEventsPage() { if (eventsPage < totalEventsPages) eventsPage++; }
+  function jumpToEventsPage(p: number) { eventsPage = p; showEventsPageDropdown = false; }
   
   // ===== Lifecycle =====
   onMount(() => {
-    loadEvents();
+    // Defer loading events to idle time to avoid blocking initial render
+    try {
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        (window as any).requestIdleCallback(() => loadEvents());
+      } else {
+        setTimeout(() => loadEvents(), 200);
+      }
+    } catch (e) {
+      setTimeout(() => loadEvents(), 200);
+    }
+    loadRewardDefinitions();
+    // Initialize lazy image loader
+    lazyLoadImages();
+  });
+
+  // Load reward definitions (GET /rewards)
+  async function loadRewardDefinitions(skip = 0, limit = 100) {
+    try {
+      // Try several common endpoint paths in case the API base differs across environments
+      const candidates = [] as string[];
+      if ((endpoints as any)?.rewards?.list) candidates.push((endpoints as any).rewards.list);
+      // Common REST prefixes
+      candidates.push('/api/rewards', '/api/v1/rewards', '/rewards');
+
+      let res = null;
+      let usedUrl = '';
+      for (const url of candidates) {
+        try {
+          res = await api.get(url, { params: { skip, limit } });
+          usedUrl = url;
+          break;
+        } catch (e: any) {
+          // If 404 or other client/server error, try next candidate
+          if (import.meta.env.DEV) console.debug('[rewards] endpoint candidate failed', { url, status: e?.response?.status, message: e?.message });
+          continue;
+        }
+      }
+
+      if (!res) {
+        throw new Error('No reward list endpoint available');
+      }
+
+      const data = res.data;
+      const raw = Array.isArray(data) ? data : (data.data || data.items || []);
+      rewardDefinitions = raw.map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        description: r.description ?? null,
+        badge_image_url: r.badge_image_url ?? null,
+        required_completions: typeof r.required_completions === 'number' ? r.required_completions : (r.required_completions ?? 3),
+        time_period_days: typeof r.time_period_days === 'number' ? r.time_period_days : (r.time_period_days ?? 30),
+        created_at: r.created_at,
+        updated_at: r.updated_at
+      }));
+
+      // Deduplicate by id and filter out unhelpful numeric-only names
+      const byId = new Map<number, RewardRead>();
+      for (const rd of rewardDefinitions) {
+        if (!byId.has(rd.id)) byId.set(rd.id, rd);
+      }
+      rewardDefinitions = Array.from(byId.values()).filter(rd => {
+        const name = (rd.name ?? '').toString().trim();
+        // drop empty names
+        if (!name) return false;
+        // drop names that are purely numeric (likely an id or bad label)
+        if (/^\d+$/.test(name)) return false;
+        // drop names that exactly equal the numeric id
+        if (name === String(rd.id)) return false;
+        return true;
+      });
+
+      if (import.meta.env.DEV) console.log('[rewards] loaded reward definitions from', usedUrl, 'count=', rewardDefinitions.length);
+
+      // If we're in dev and nothing returned, fall back to a small mock so UI can be previewed
+      if (USE_MOCK_REWARDS && rewardDefinitions.length === 0) {
+        rewardDefinitions = [
+          { id: 1, name: 'Early Bird', description: 'Join early to get this badge', badge_image_url: 'https://placehold.co/64x64', required_completions: 3, time_period_days: 30 },
+          { id: 2, name: 'Consistent', description: 'Attend regularly for a month', badge_image_url: 'https://placehold.co/64x64', required_completions: 10, time_period_days: 30 }
+        ];
+      }
+      // After updating rewardDefinitions (badges), ensure lazy loader attaches to badge images
+      await tick();
+      lazyLoadImages();
+    } catch (err) {
+      console.warn('Failed to load reward definitions', err);
+      // Keep UI usable in dev — provide small mock set
+      if (USE_MOCK_REWARDS) {
+        rewardDefinitions = [
+          { id: 1, name: 'Early Bird', description: 'Join early to get this badge', badge_image_url: 'https://placehold.co/64x64', required_completions: 3, time_period_days: 30 },
+          { id: 2, name: 'Consistent', description: 'Attend regularly for a month', badge_image_url: 'https://placehold.co/64x64', required_completions: 10, time_period_days: 30 }
+        ];
+      }
+    }
+  }
+
+  // Improved lazy-loading helper using a single IntersectionObserver instance.
+  // Images should use the `lazy-img` class and `data-src` attribute.
+  // Additionally we cache loaded image URLs in sessionStorage so that when
+  // the user navigates away and back the images show immediately without
+  // requiring a full page refresh.
+  const IMG_CACHE_KEY_PREFIX = 'lazy-img:';
+  let lazyObserver: IntersectionObserver | null = null;
+
+  function safeSessionGet(key: string) {
+    try { return sessionStorage.getItem(key); } catch (e) { return null; }
+  }
+  function safeSessionSet(key: string, val: string) {
+    try { sessionStorage.setItem(key, val); } catch (e) { /* ignore */ }
+  }
+
+  function lazyLoadImages() {
+    if (typeof window === 'undefined') return;
+    const imgs = Array.from(document.querySelectorAll('img.lazy-img')) as HTMLImageElement[];
+    if (!imgs.length) return;
+
+    // If IntersectionObserver not supported, eagerly set src for all images
+    if (!('IntersectionObserver' in window)) {
+      imgs.forEach(img => {
+        const s = img.dataset.src;
+        if (s) {
+          img.src = s;
+          img.removeAttribute('data-src');
+          img.classList.add('loaded');
+        }
+      });
+      return;
+    }
+
+    // First, apply cached src for any images we've loaded previously
+    imgs.forEach(img => {
+      const s = img.dataset.src;
+      if (s && safeSessionGet(IMG_CACHE_KEY_PREFIX + s)) {
+        img.src = s;
+        img.removeAttribute('data-src');
+        img.classList.add('loaded');
+      }
+    });
+
+    // Create observer if needed (idempotent)
+    if (!lazyObserver) {
+      lazyObserver = new IntersectionObserver((entries, observer) => {
+        entries.forEach(entry => {
+          if (!entry.isIntersecting) return;
+          const img = entry.target as HTMLImageElement;
+          const src = img.dataset.src;
+          if (src) {
+            img.src = src;
+            img.removeAttribute('data-src');
+            img.classList.add('loaded');
+            safeSessionSet(IMG_CACHE_KEY_PREFIX + src, '1');
+          }
+          observer.unobserve(img);
+        });
+      }, { rootMargin: '200px' });
+    }
+
+    imgs.forEach(i => {
+      // if image already loaded by cache or previous observation, skip
+      if (!i.dataset.src) return;
+      lazyObserver!.observe(i);
+    });
+  }
+
+  onDestroy(() => {
+    try { if (lazyObserver) { lazyObserver.disconnect(); lazyObserver = null; } } catch (e) { /* ignore */ }
+  });
+
+  // Ensure the lazy loader runs when component mounts and after updates
+  onMount(() => {
+    lazyLoadImages();
+  });
+  afterUpdate(() => {
+    lazyLoadImages();
   });
 
   // Finalize availability: cannot finalize before event end
@@ -697,10 +940,7 @@
 <div class="reward-management-container">
   {#if view === 'events'}
     <div class="events-view">
-      <div class="page-header">
-        <h1>{lang.rewardManagement}</h1>
-        <p>{lang.selectEvent}</p>
-      </div>
+      
       
       {#if loading}
         <div class="loading-state">
@@ -716,12 +956,19 @@
         </div>
       {:else}
         <div class="events-grid">
-          {#each events as event}
+          {#each paginatedEvents as event}
             <div class="event-card">
               <div class="event-image-wrapper">
-                <img src={event.image || 'https://placehold.co/400x200/1e293b/ffffff?text=No+Image'} alt={event.title} class="event-image" />
-                <div class="event-status-badge" class:active={event.status === 'Active'} class:closed={event.status === 'Closed'}>
-                  {event.status}
+                <img
+                  class="event-image lazy-img"
+                  data-src={event.image || 'https://placehold.co/400x200/1e293b/ffffff?text=No+Image'}
+                  src={IMAGE_PLACEHOLDER}
+                  alt={event.title}
+                  loading="lazy"
+                  decoding="async"
+                />
+                <div class="event-status-badge" class:active={event.is_active} class:closed={!event.is_active}>
+                  {event.is_active ? lang.enabled : lang.disabled}
                 </div>
               </div>
               
@@ -756,6 +1003,34 @@
             </div>
           {/each}
         </div>
+
+        {#if totalEventsPages > 1}
+          <div class="pagination-wrapper" style="margin-top:1.5rem;">
+            <div class="pagination-controls">
+              <button class="page-btn" aria-label={currentLang === 'th' ? 'ก่อนหน้า' : 'Previous'} on:click={() => { if (eventsPage > 1) eventsPage--; }} disabled={eventsPage === 1}>
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+              </button>
+              <div class="page-select-wrapper">
+                  <button class="page-indicator-box" on:click|stopPropagation={() => showEventsPageDropdown = !showEventsPageDropdown}>
+                      <span class="current-page">{eventsPage}</span><span class="sep">/</span><span class="total-page">{totalEventsPages}</span>
+                      <svg class="dropdown-arrow" class:flipped={showEventsPageDropdown} width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 9l-7 7-7-7"></path></svg>
+                  </button>
+                  {#if showEventsPageDropdown}
+                      <div class="click-outside" role="button" tabindex="0" aria-hidden="true" on:click|stopPropagation={() => showEventsPageDropdown = false} on:keydown|stopPropagation={(e) => { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') showEventsPageDropdown = false; }}></div>
+                      <div class="page-dropdown-list">
+                          {#each Array(totalEventsPages) as _, i}
+                            <button class="page-option" class:active={eventsPage === i + 1} on:click|stopPropagation={() => { eventsPage = i + 1; showEventsPageDropdown = false; }}>{'Page ' + (i + 1)}</button>
+                          {/each}
+                      </div>
+                  {/if}
+              </div>
+              <button class="page-btn" aria-label={currentLang === 'th' ? 'ถัดไป' : 'Next'} on:click={() => { if (eventsPage < totalEventsPages) eventsPage++; }} disabled={eventsPage === totalEventsPages}>
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+              </button>
+            </div>
+            <div class="showing-text">{lang.showingResults} {(eventsPage - 1) * eventsPerPage + 1} - {Math.min(eventsPage * eventsPerPage, events.length)} {lang.of} {events.length} {lang.results}</div>
+          </div>
+        {/if}
       {/if}
     </div>
   {:else}
@@ -807,6 +1082,8 @@
         </div>
       </div>
       
+      <!-- reward definitions preview removed per request -->
+
       {#if !rewardConfig && !loading}
         <div class="empty-state">
             <p style="color: #ef4444; font-size: 1.2rem; font-weight: bold;">{lang.noConfigTitle}</p>
@@ -1041,7 +1318,7 @@
       {#if totalPages > 1}
         <div class="pagination-wrapper">
           <div class="pagination-controls">
-            <button class="page-btn" on:click={prevPage} disabled={currentPage === 1}>
+            <button class="page-btn" on:click={prevPage} disabled={currentPage === 1} aria-label={currentLang === 'th' ? 'ก่อนหน้า' : 'Previous'}>
               <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
               </svg>
@@ -1056,7 +1333,14 @@
                 </svg>
               </button>
               {#if showPageDropdown}
-                <div class="click-outside" on:click|stopPropagation={() => showPageDropdown = false}></div>
+                <div
+                  class="click-outside"
+                  role="button"
+                  tabindex="0"
+                  aria-label={currentLang === 'th' ? 'ปิด' : 'Close'}
+                  on:click|stopPropagation={() => showPageDropdown = false}
+                  on:keydown|stopPropagation={(e) => { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') { showPageDropdown = false } }}
+                ></div>
                 <div class="page-dropdown-list">
                   {#each Array(totalPages) as _, i}
                     <button class="page-option" class:active={currentPage === i + 1} on:click|stopPropagation={() => { jumpToPage(i + 1); showPageDropdown = false; }}>
@@ -1066,7 +1350,7 @@
                 </div>
               {/if}
             </div>
-            <button class="page-btn" on:click={nextPage} disabled={currentPage === totalPages}>
+            <button class="page-btn" on:click={nextPage} disabled={currentPage === totalPages} aria-label={currentLang === 'th' ? 'ถัดไป' : 'Next'}>
               <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
               </svg>
@@ -1086,9 +1370,7 @@
   /* ใช้ Style เดิมทั้งหมด (ไม่ได้เปลี่ยนแปลง CSS) */
   .reward-management-container { width: 100%; min-height: 100vh; background: #0f172a; }
   .events-view { max-width: 1400px; margin: 0 auto; padding: 2rem; }
-  .page-header { margin-bottom: 3rem; text-align: center; }
-  .page-header h1 { font-size: 2.5rem; font-weight: 700; color: #f8fafc; margin-bottom: 0.5rem; }
-  .page-header p { font-size: 1.125rem; color: #94a3b8; }
+  /* page header removed per design preference */
   .events-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 2rem; }
   .event-card { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 20px; overflow: hidden; transition: all 0.3s; }
   .event-card:hover { transform: translateY(-4px); border-color: rgba(16, 185, 129, 0.4); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3); }
@@ -1107,7 +1389,8 @@
   .btn-view-rewards { width: 100%; padding: 0.875rem 1.25rem; background: linear-gradient(135deg, #10b981, #059669); border: none; border-radius: 12px; color: white; font-weight: 600; font-size: 0.95rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem; cursor: pointer; transition: all 0.3s; }
   .btn-view-rewards:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(16, 185, 129, 0.4); }
   .leaderboard-view { max-width: 1600px; margin: 0 auto; padding: 2rem; }
-  .reward-header { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 20px; padding: 1.5rem; margin-bottom: 2rem; display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; }
+  .reward-header { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 20px; padding: 1.5rem; margin-bottom: 2rem; display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;position: relative;
+  z-index: 30; }
   .btn-back { background: rgba(100, 116, 139, 0.2); border: 1px solid rgba(100, 116, 139, 0.3); color: #94a3b8; padding: 0.75rem 1.25rem; border-radius: 12px; display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.9rem; font-weight: 600; transition: all 0.2s; flex-shrink: 0; }
   .btn-back:hover { background: rgba(100, 116, 139, 0.3); border-color: #64748b; color: #f8fafc; transform: translateX(-2px); }
   .header-info { flex: 1; min-width: 250px; }
@@ -1134,9 +1417,9 @@
   .btn-step:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-step.btn-danger { background: linear-gradient(135deg, #ef4444, #dc2626); }
   .btn-step.btn-danger:hover:not(:disabled) { box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3); }
-  .btn-step.btn-reset { background: linear-gradient(135deg, #64748b, #475569); }
+  /* removed unused .btn-step.btn-reset to silence css_unused_selector */
   .step-status { padding: 0.75rem 1rem; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 12px; color: #10b981; font-size: 0.875rem; font-weight: 600; text-align: center; }
-  .step-reset { grid-column: 1 / -1; }
+  /* removed unused .step-reset to silence css_unused_selector */
   .btn-spinner { width: 16px; height: 16px; border: 2px solid rgba(255, 255, 255, 0.3); border-top-color: white; border-radius: 50%; animation: spin 0.6s linear infinite; }
   .stats-dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
   .stat-card { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 1.5rem; display: flex; align-items: center; gap: 1rem; transition: all 0.3s; }
@@ -1145,7 +1428,8 @@
   .stat-info { display: flex; flex-direction: column; gap: 0.25rem; }
   .stat-value { font-size: 2rem; font-weight: 700; color: #f8fafc; line-height: 1; }
   .stat-label { font-size: 0.875rem; font-weight: 500; color: #94a3b8; line-height: 1; }
-  .filter-section { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 20px; padding: 1.5rem; margin-bottom: 2rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+  .filter-section { position: relative;
+  z-index: 20;background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 20px; padding: 1.5rem; margin-bottom: 2rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
   .search-box { flex: 1; min-width: 250px; position: relative; }
   .search-icon { position: absolute; left: 1rem; top: 50%; transform: translateY(-50%); color: #64748b; pointer-events: none; }
   .search-input { width: 100%; padding: 0.75rem 1rem 0.75rem 2.75rem; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; color: #f8fafc; font-size: 0.9rem; }
@@ -1181,29 +1465,31 @@
   .date-cell { color: #94a3b8; font-size: 0.85rem; }
   .reward-cell { max-width: 200px; }
   .pagination-wrapper { display: flex; flex-direction: column; align-items: center; gap: 1rem; }
-  .pagination-controls { display: flex; align-items: center; gap: 1rem; }
-  .page-btn { width: 40px; height: 40px; border-radius: 12px; background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); color: #f8fafc; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
+  .pagination-controls { display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
+  .page-btn { width: 40px; height: 40px; margin: 0; border-radius: 12px; background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); color: #f8fafc; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
   .page-btn:hover:not(:disabled) { background: rgba(16, 185, 129, 0.2); border-color: #10b981; }
   .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-  .page-select-wrapper { position: relative; }
+  .page-select-wrapper { position: relative; display: flex; align-items: center; min-width: 0; }
   .page-indicator-box { padding: 0.5rem 1rem; background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-weight: 600; color: #f8fafc; }
   .page-indicator-box .sep { color: #64748b; }
   .dropdown-arrow { transition: transform 0.2s; }
   .dropdown-arrow.flipped { transform: rotate(180deg); }
-  .page-dropdown-list { position: absolute; top: calc(100% + 0.5rem); left: 50%; transform: translateX(-50%); background: #1e293b; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 0.5rem; max-height: 300px; overflow-y: auto; min-width: 120px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); z-index: 1000; animation: slideDown 0.2s ease; }
-  .page-option { width: 100%; padding: 0.75rem 1rem; background: transparent; border: none; color: #f8fafc; text-align: center; cursor: pointer; border-radius: 8px; font-size: 0.9rem; transition: all 0.2s; }
-  .page-option:hover { background: rgba(16, 185, 129, 0.1); }
-  .page-option.active { background: rgba(16, 185, 129, 0.2); color: #10b981; font-weight: 700; }
+  .page-dropdown-list { position: absolute; top: calc(100% + 0.5rem); left: 0; transform: none; background: #1e293b; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 0; max-height: 300px; overflow-y: auto; min-width: 100%; width: 100%; box-sizing: border-box; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); z-index: 2147483647; animation: slideDown 0.2s ease; }
+  .page-option { display: block; width: 100%; padding: 0.75rem 1rem; background: transparent; border: none; color: #f8fafc; text-align: left; cursor: pointer; font-size: 0.95rem; transition: background 0.12s, color 0.12s; box-sizing: border-box; }
+  .page-option:hover { background: rgba(16, 185, 129, 0.06); }
+  .page-option.active { background: rgba(16, 185, 129, 0.15); color: #10b981; font-weight: 700; box-shadow: inset 0 0 0 1px rgba(16,185,129,0.06); }
+  .page-option:first-child { border-top-left-radius: 12px; border-top-right-radius: 12px; }
+  .page-option:last-child { border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
   .showing-text { font-size: 0.9rem; color: #94a3b8; }
   .click-outside { position: fixed; inset: 0; z-index: 999; }
   .loading-state, .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4rem 2rem; color: #64748b; }
-  .loading-state svg, .empty-state svg { margin-bottom: 1rem; }
+  .empty-state svg { margin-bottom: 1rem; }
   .loading-state p, .empty-state p { font-size: 1rem; margin: 0; }
   .spinner { width: 48px; height: 48px; border: 4px solid rgba(16, 185, 129, 0.1); border-top-color: #10b981; border-radius: 50%; animation: spin 1s linear infinite; }
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (max-width: 1024px) { .stats-dashboard { grid-template-columns: repeat(3, 1fr); } .action-steps { grid-template-columns: 1fr; } }
-  @media (max-width: 768px) { .events-view, .leaderboard-view { padding: 1rem; } .page-header h1 { font-size: 2rem; } .events-grid { grid-template-columns: 1fr; } .reward-header { flex-direction: column; align-items: stretch; } .header-actions { width: 100%; } .btn-export { flex: 1; } .stats-dashboard { grid-template-columns: repeat(2, 1fr); } .filter-section { flex-direction: column; align-items: stretch; } .search-box, .filter-dropdown, .btn-reset-filter { width: 100%; } .table-wrapper { overflow-x: auto; } .leaderboard-table { min-width: 900px; } }
+  @media (max-width: 768px) { .events-view, .leaderboard-view { padding: 1rem; } .events-grid { grid-template-columns: 1fr; } .reward-header { flex-direction: column; align-items: stretch; } .header-actions { width: 100%; } .btn-export { flex: 1; } .stats-dashboard { grid-template-columns: repeat(2, 1fr); } .filter-section { flex-direction: column; align-items: stretch; } .search-box, .filter-dropdown, .btn-reset-filter { width: 100%; } .table-wrapper { overflow-x: auto; } .leaderboard-table { min-width: 900px; } }
   @media (max-width: 640px) { .stats-dashboard { grid-template-columns: 1fr; } .header-info h1 { font-size: 1.5rem; } }
 </style>
