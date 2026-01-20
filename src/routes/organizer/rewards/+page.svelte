@@ -3,6 +3,7 @@
   import axios from 'axios';
   import Swal from 'sweetalert2';
   import { endpoints } from '../_lib/api/endpoints'; //
+  import { resolveImageUrl } from '$lib/utils/imageUtils';
 
   // ===== API Configuration =====
   // ใช้ client instance ที่อาจจะมีการ config interceptors ไว้แล้วในโปรเจคจริง หรือสร้างใหม่ที่นี่
@@ -318,6 +319,8 @@
   let filteredRewards: RewardEntry[] = [];
   // list of reward definitions from GET /rewards
   let rewardDefinitions: RewardRead[] = [];
+  // Cache for fetched user profiles to avoid repeated requests
+  const userCache: Record<number, any> = {};
   const USE_MOCK_REWARDS = !!import.meta.env.DEV;
   let statistics: Statistics = {
     totalParticipants: 0,
@@ -433,6 +436,32 @@
     // reassign to ensure Svelte notices the change
     statistics = newStats;
   }
+
+  // Fetch and cache user profile by ID
+  async function ensureUser(userId: number) {
+    if (!userId) return null;
+    if (userCache[userId]) return userCache[userId];
+    try {
+      const res = await api.get(endpoints.users.getById(userId));
+      userCache[userId] = res.data;
+      return userCache[userId];
+    } catch (e) {
+      console.warn('Could not fetch user', userId, e);
+      userCache[userId] = null;
+      return null;
+    }
+  }
+
+  function formatUserName(entry: RewardEntry) {
+    const u = userCache[entry.user_id];
+    if (u && (u.first_name || u.last_name)) return `${u.first_name || ''} ${u.last_name || ''}`.trim();
+    return entry.user_full_name || '-';
+  }
+
+  function formatNisitId(entry: RewardEntry) {
+    const u = userCache[entry.user_id];
+    return (u && (u.nisit_id || u.nisitId)) || entry.user_nisit_id || '-';
+  }
   
   // ===== Data Loading =====
   async function loadEvents() {
@@ -451,7 +480,7 @@
         location: e.location,
         start_date: e.start_date || e.event_date,
         end_date: e.end_date || e.event_end_date,
-        image: e.banner_image_url || e.cover_image_url || e.image || '',
+        image: resolveImageUrl(e.banner_image_url || e.cover_image_url || e.image || ''),
         status: e.is_active ? 'Active' : 'Closed',
         is_active: !!e.is_active,
         max_participants: e.max_participants,
@@ -506,6 +535,15 @@
              updated_at: r.updated_at
           }));
             if (import.meta.env.DEV) console.debug('[rewards] loaded entries', { count: rewards.length, first: rewards[0] });
+
+          // Prefetch user profiles for displayed entries (cache)
+          try {
+            const userIds = Array.from(new Set(rewards.map(r => r.user_id).filter(Boolean)));
+            await Promise.all(userIds.map((id: number) => ensureUser(id)));
+            if (import.meta.env.DEV) console.debug('[rewards] prefetched users', Object.keys(userCache).length);
+          } catch (e) {
+            console.warn('Prefetch users failed', e);
+          }
       } else {
           // กรณีไม่มี Config อาจจะยังไม่เคยตั้งค่า
           console.warn("No reward config found for this event.");
@@ -697,20 +735,33 @@
   }
   
   function exportAsCSV() {
-    const headers = ['Rank', 'Name', 'Email', 'Nisit ID', 'Completions', 'Status', 'Reward', 'Rewarded At'];
-    const rows = filteredRewards.map(r => [
-      r.rank,
-      r.user_full_name,
-      r.user_email,
-      r.user_nisit_id || '-',
-      r.total_completions,
-      getStatusLabel(r),
-      r.reward_name || (r.reward_tier ? `Tier ${r.reward_tier}` : '-'),
-      formatTimestamp(r.rewarded_at)
-    ]);
+    const headers = ['Rank','User ID','Name','Email','Nisit ID','Role','Completions','Status','Reward','Qualified At','Rewarded At','Created At'];
+    const rows = filteredRewards.map((r) => {
+      const user = userCache[r.user_id] || null;
+      const name = (user && (user.first_name || user.last_name)) ? `${user.first_name || ''} ${user.last_name || ''}`.trim() : (r.user_full_name || '-');
+      const email = (user && user.email) || r.user_email || '-';
+      const nisit = (user && (user.nisit_id || user.nisitId)) || r.user_nisit_id || '-';
+      const role = (user && user.role) || r.user_role || '-';
+      const rewardLabel = r.reward_name || (r.reward_tier ? `Tier ${r.reward_tier}` : '-');
+
+      return [
+        r.rank ?? '-',
+        r.user_id ?? '-',
+        name,
+        email,
+        nisit,
+        role,
+        r.total_completions ?? 0,
+        getStatusLabel(r),
+        rewardLabel,
+        formatTimestamp(r.qualified_at),
+        formatTimestamp(r.rewarded_at),
+        r.created_at || ''
+      ];
+    });
     const csv = [
       headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+      ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
     ].join('\n');
     downloadFile(csv, `reward-leaderboard-${selectedEvent?.id}-${Date.now()}.csv`, 'text/csv');
   }
@@ -1279,9 +1330,9 @@
                       #{entry.rank}
                     </div>
                   </td>
-                  <td class="name-cell">{entry.user_full_name}</td>
-                  <td class="email-cell">{entry.user_email}</td>
-                  <td class="nisit-cell">{entry.user_nisit_id || '-'}</td>
+                  <td class="name-cell">{formatUserName(entry)}</td>
+                  <td class="email-cell">{userCache[entry.user_id]?.email || entry.user_email}</td>
+                  <td class="nisit-cell">{formatNisitId(entry)}</td>
                   <td>
                     <span class="role-badge" class:officer={entry.user_role === 'officer'}>
                       {entry.user_role === 'officer' ? lang.officer : lang.participant}
@@ -1295,11 +1346,11 @@
                   </td>
                   <td class="reward-cell">
                     {#if entry.reward_name}
-                        <span class="tier-badge">{entry.reward_name}</span>
+                        <span class="tier-badge"><span class="tier-text">{entry.reward_name}</span></span>
                     {:else if entry.reward_tier && rewardConfig}
                       {@const tier = rewardConfig.reward_tiers.find(t => t.tier === entry.reward_tier)}
                       {#if tier}
-                        <span class="tier-badge">{tier.reward_name}</span>
+                        <span class="tier-badge"><span class="tier-text">{tier.reward_name}</span></span>
                       {:else}
                         Tier {entry.reward_tier}
                       {/if}
@@ -1368,11 +1419,12 @@
 
 <style>
   /* ใช้ Style เดิมทั้งหมด (ไม่ได้เปลี่ยนแปลง CSS) */
-  .reward-management-container { width: 100%; min-height: 100vh; background: #0f172a; }
+  .reward-management-container { width: 100%; min-height: 100vh;  }
   .events-view { max-width: 1400px; margin: 0 auto; padding: 2rem; }
   /* page header removed per design preference */
   .events-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 2rem; }
   .event-card { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 20px; overflow: hidden; transition: all 0.3s; }
+  .event-card { min-width: 0; }
   .event-card:hover { transform: translateY(-4px); border-color: rgba(16, 185, 129, 0.4); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3); }
   .event-image-wrapper { position: relative; width: 100%; height: 200px; overflow: hidden; }
   .event-image { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s; }
@@ -1381,7 +1433,7 @@
   .event-status-badge.active { background: rgba(16, 185, 129, 0.9); color: white; }
   .event-status-badge.closed { background: rgba(100, 116, 139, 0.9); color: white; }
   .event-card-body { padding: 1.5rem; }
-  .event-title { font-size: 1.25rem; font-weight: 700; color: #f8fafc; margin-bottom: 0.75rem; }
+  .event-title { font-size: 1.25rem; font-weight: 700; color: #f8fafc; margin-bottom: 0.75rem; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
   .event-description { color: #cbd5e1; font-size: 0.9rem; line-height: 1.6; margin-bottom: 1rem; }
   .event-meta { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.5rem; }
   .meta-item { display: flex; align-items: center; gap: 0.5rem; color: #94a3b8; font-size: 0.875rem; }
@@ -1393,8 +1445,8 @@
   z-index: 30; }
   .btn-back { background: rgba(100, 116, 139, 0.2); border: 1px solid rgba(100, 116, 139, 0.3); color: #94a3b8; padding: 0.75rem 1.25rem; border-radius: 12px; display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.9rem; font-weight: 600; transition: all 0.2s; flex-shrink: 0; }
   .btn-back:hover { background: rgba(100, 116, 139, 0.3); border-color: #64748b; color: #f8fafc; transform: translateX(-2px); }
-  .header-info { flex: 1; min-width: 250px; }
-  .header-info h1 { font-size: 1.75rem; font-weight: 700; color: #f8fafc; margin: 0 0 0.5rem 0; }
+  .header-info { flex: 1; min-width: 0; }
+  .header-info h1 { font-size: 1.75rem; font-weight: 700; color: #f8fafc; margin: 0 0 0.5rem 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
   .event-meta-small { display: flex; align-items: center; gap: 1rem; font-size: 0.9rem; color: #94a3b8; }
   .config-status { display: inline-flex; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; background: rgba(100, 116, 139, 0.2); border: 1px solid rgba(100, 116, 139, 0.3); color: #64748b; }
   .config-status.finalized { background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.3); color: #10b981; }
@@ -1451,6 +1503,7 @@
   .leaderboard-table thead { background: rgba(15, 23, 42, 0.8); }
   .leaderboard-table th { padding: 1rem; text-align: left; font-weight: 600; font-size: 0.875rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
   .leaderboard-table td { padding: 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.05); font-size: 0.9rem; color: #f8fafc; }
+    .leaderboard-table td { overflow: hidden; }
   .leaderboard-table tbody tr { transition: all 0.2s; }
   .leaderboard-table tbody tr:hover { background: rgba(16, 185, 129, 0.05); }
   .rank-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 50px; padding: 0.5rem 0.75rem; border-radius: 12px; font-weight: 700; font-size: 0.9rem; color: white; }
@@ -1461,9 +1514,12 @@
   .role-badge.officer { background: rgba(59, 130, 246, 0.2); border-color: rgba(59, 130, 246, 0.3); color: #3b82f6; }
   .completions-cell { font-weight: 700; font-size: 1.1rem; color: #10b981; }
   .status-badge { display: inline-flex; padding: 0.375rem 0.75rem; border: 1px solid; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
-  .tier-badge { display: inline-flex; padding: 0.375rem 0.75rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.3); color: #f59e0b; }
+  .tier-badge { display: inline-flex; padding: 0.375rem 0.75rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.3); color: #f59e0b; min-width: 0; align-items: center; gap: 0.375rem; }
+  .tier-badge .tier-text { display: inline-block; max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+  .tier-badge { min-width: 0; gap: 0.375rem; align-items: center; }
+  .tier-badge .tier-text { display: inline-block; max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
   .date-cell { color: #94a3b8; font-size: 0.85rem; }
-  .reward-cell { max-width: 200px; }
+  .reward-cell { max-width: 200px; overflow: hidden; }
   .pagination-wrapper { display: flex; flex-direction: column; align-items: center; gap: 1rem; }
   .pagination-controls { display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
   .page-btn { width: 40px; height: 40px; margin: 0; border-radius: 12px; background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); color: #f8fafc; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }

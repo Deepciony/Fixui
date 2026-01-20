@@ -600,10 +600,15 @@
 
                 Swal.fire({
                   title: 'Assigned Rewards',
-                  html: `<div style="text-align:left;">${list}</div>`,
+                  html: `
+                    <div style="text-align:left; max-height:280px; overflow:auto; padding:6px 4px;">
+                      <ul style="margin:0;padding-left:18px;color:#e6edf3">${list}</ul>
+                    </div>
+                  `,
                   icon: 'info',
-                  background: '#1e293b',
+                  background: '#0b1220',
                   color: '#fff',
+                  width: 520,
                   confirmButtonColor: '#10b981'
                 });
               }

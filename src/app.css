@@ -38,6 +38,39 @@
 .center { display:flex; align-items:center; justify-content:center; }
 .error { color: #ff6b6b; }
 
+/* Global truncation rules for reward names / badges */
+.tier-badge, .reward-name, .tier-text, .reward-card .title, .card .reward-name {
+  min-width: 0; /* allow flex children to shrink */
+}
+
+.tier-badge .tier-text,
+.reward-name,
+.reward-card .title,
+.card .reward-name {
+  display: inline-block;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* Make sure table cells don't expand layout when text is long */
+table td, table th {
+  word-break: break-word;
+  overflow: hidden;
+}
+
+/* Truncate long event titles globally */
+.event-card, .card { min-width: 0; }
+.event-title, .event-name, .card .title, .event-card .event-title {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Small responsive tweaks */
 @media (max-width: 640px) {
   :root { --nav-height: 64px; }
