@@ -136,6 +136,7 @@
     updatedAt: string;
     stravaLink?: string;
     actualDistance?: number;
+    userId?: number | string | null;
   }
   
   interface Statistics {
@@ -408,6 +409,8 @@
               // ✅ [แก้ไข 6] ใช้ strava_link และ actual_distance_km
               stravaLink: item.strava_link || item.strava_url || null,
               actualDistance: parseFloat(item.actual_distance_km || item.distance || "0"),
+              // keep user id if available so we can fetch UserReward after verify
+              userId: userObj.id || item.user_id || item.userId || null,
             };
           });
       } else {
@@ -452,6 +455,18 @@
       throw new Error(err.response?.data?.message || "Verification failed");
     }
   }
+
+  // Fetch UserReward records for a user (used after approval)
+  async function fetchUserRewards(userId: number | string | null) {
+    if (!userId) return [];
+    try {
+      const res = await api.get(endpoints.rewards.getByUser(userId));
+      return res.data || [];
+    } catch (err) {
+      console.warn('Failed to fetch user rewards:', err);
+      return [];
+    }
+  }
   
   async function onApproveSubmission(sub: Submission) {
     const stravaInfo = sub.stravaLink
@@ -511,6 +526,32 @@
           background: "#1e293b",
           iconColor: "#10b981",
         });
+          // After confirmation, try to fetch any UserReward records created for this user
+          (async () => {
+            try {
+              const uid = sub.userId || null;
+              if (!uid) return;
+              const userRewards = await fetchUserRewards(uid);
+              if (Array.isArray(userRewards) && userRewards.length > 0) {
+                const list = userRewards.map((r: any) => {
+                  const when = r.rewarded_at || r.created_at || r.awarded_at || '';
+                  const whenFmt = when ? formatTimestamp(when) : '-';
+                  return `<li style="margin-bottom:6px;"><strong>${r.name || r.reward_name || 'Reward'}</strong> — ${whenFmt}</li>`;
+                }).join('');
+
+                Swal.fire({
+                  title: 'Assigned Rewards',
+                  html: `<div style="text-align:left;">${list}</div>`,
+                  icon: 'info',
+                  background: '#1e293b',
+                  color: '#fff',
+                  confirmButtonColor: '#10b981'
+                });
+              }
+            } catch (e) {
+              console.warn('Error fetching user rewards after approve:', e);
+            }
+          })();
       }
     });
   }

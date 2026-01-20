@@ -1,5 +1,6 @@
 <script lang="ts">
   import { appState } from '../../_lib/stores/appState';
+  import { auth } from '../../_lib/stores/auth';
   import { formatDate } from '../../_lib/utils/dateTime';
   
   export let proof: any;
@@ -11,6 +12,7 @@
   $: statusBg = proof.status === 'approved' ? '#d1fae5' : proof.status === 'rejected' ? '#fee2e2' : '#fef3c7';
   
   let showFullImage = false;
+  $: canModerate = $auth.isAuthenticated && ($auth.user?.role === 'organizer' || $auth.user?.role === 'admin');
 </script>
 
 <div class="proof-card">
@@ -58,21 +60,25 @@
     {/if}
     
     {#if proof.status === 'pending'}
-      <div class="proof-actions">
-        <button class="btn-reject" on:click={onReject}>
-          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-          {lang === 'th' ? 'ปฏิเสธ' : 'Reject'}
-        </button>
-        
-        <button class="btn-approve" on:click={onApprove}>
-          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-          </svg>
-          {lang === 'th' ? 'อนุมัติ' : 'Approve'}
-        </button>
-      </div>
+      {#if canModerate}
+        <div class="proof-actions">
+          <button class="btn-reject" on:click={onReject}>
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            {lang === 'th' ? 'ปฏิเสธ' : 'Reject'}
+          </button>
+          
+          <button class="btn-approve" on:click={onApprove}>
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+            </svg>
+            {lang === 'th' ? 'อนุมัติ' : 'Approve'}
+          </button>
+        </div>
+      {:else}
+        <div class="muted-note">{lang === 'th' ? 'เฉพาะผู้จัดงานสามารถอนุมัติหรือปฏิเสธได้' : 'Only organizers can approve or reject'}</div>
+      {/if}
     {:else if proof.status === 'approved' && proof.points}
       <div class="points-badge">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -147,6 +153,7 @@
   
   .rejection-reason { display: flex; align-items: start; gap: 0.5rem; padding: 0.75rem; background: #fee2e2; border: 1px solid #ef4444; border-radius: 8px; font-size: 0.875rem; color: #ef4444; }
   .rejection-reason svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 0.125rem; }
+  .muted-note { font-size: 0.875rem; color: var(--text-muted); padding: 0.5rem 0; }
   
   .image-modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.9); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 2rem; }
   .image-modal img { max-width: 100%; max-height: 100%; object-fit: contain; }
