@@ -22,6 +22,20 @@
     timeout: 30000,
   });
 
+  // Feature-detect whether reward-leaderboards endpoints exist on this server.
+  // If not present, set `rewardApiAvailable = false` so we avoid 404s when editing events.
+  let rewardApiAvailable: boolean | null = null;
+  async function checkRewardApiAvailability() {
+    try {
+      const token = localStorage.getItem("access_token");
+      const headers = token ? { "Authorization": `Bearer ${token}` } : {};
+      const res = await api.get('/api/reward-leaderboards/configs', { headers });
+      rewardApiAvailable = res && res.status >= 200 && res.status < 300;
+    } catch (err: any) {
+      rewardApiAvailable = false;
+    }
+  }
+
   // ✅ 1. Request Interceptor: Attach fresh token
   api.interceptors.request.use((config) => {
     let token = null;
@@ -42,26 +56,25 @@
 
       if (error.response && error.response.status === 401 && !originalRequest._retry) {
           originalRequest._retry = true;
-          console.log("🔄 Token expired, attempting auto-refresh...");
+          // token refresh attempt
 
           try {
               const refreshed = await auth.refreshAccessToken();
               
               if (refreshed) {
-                  console.log("✅ Token refreshed successfully. Retrying request...");
+                  // token refreshed
                   const newToken = localStorage.getItem('access_token');
                   
                   api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
                   originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
                   return api(originalRequest);
               }
-          } catch (refreshErr) {
-              console.error("❌ Auto-refresh failed:", refreshErr);
-          }
+            } catch (refreshErr) {
+              // refresh failed
+            }
       }
 
       if (error.response && error.response.status === 401) {
-        console.error("❌ 401 Unauthorized - Session Expired");
         
         Swal.fire({
             title: 'Session Expired',
@@ -73,8 +86,8 @@
             allowOutsideClick: false
         }).then((result) => {
             if (result.isConfirmed) {
-                if (typeof localStorage !== "undefined") localStorage.removeItem('access_token');
-                goto('/auth/login'); 
+              if (typeof localStorage !== "undefined") localStorage.removeItem('access_token');
+              goto('/auth/login');
             }
         });
       }
@@ -270,7 +283,13 @@
 
   async function fetchEventDetails(id: string) {
     try {
-      Swal.fire({ title: 'Loading...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+      Swal.fire({
+        title: 'Loading...',
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        customClass: { popup: 'swal-dark' },
+        didOpen: () => Swal.showLoading()
+      });
       const res = await api.get(`/api/events/${id}`);
       const data = res.data;
 
@@ -340,45 +359,51 @@
 
       formData.isPublic = data.is_public ?? data.is_published ?? true;
       formData.isActive = data.is_active ?? true;
-      console.log("📊 Loaded status:", { 
-        isPublic: formData.isPublic, 
-        isActive: formData.isActive,
-        from_backend: { is_public: data.is_public, is_active: data.is_active }
-      });
+      // loaded status
       formData.imagePreview = resolveImageUrl(data.banner_image_url || data.image || data.image_url);
       
       // ✅ Load reward config (optional - don't fail if not found)
       try {
-        const configRes = await api.get(`/api/reward-leaderboards/configs/event/${id}`);
-        const config = configRes.data;
-        if (config) {
-          editingRewardConfigId = config.id;
-          formData.totalRewards = config.max_reward_recipients;
-          if (config.reward_tiers && config.reward_tiers.length > 0) {
-            console.log("Loading reward tiers:", config.reward_tiers);
-            formData.rewardTiers = config.reward_tiers.map((t: any) => {
-              const rewardName = t.reward_name || t.reward?.name || t.name || "";
-              console.log("Tier:", t, "→ Name:", rewardName);
-              return {
-                reward_name: rewardName,
-                required_completions: t.required_completions || 0
-              };
-            });
-            console.log("Loaded tiers:", formData.rewardTiers);
+        // If we haven't checked availability yet, do so once
+        if (rewardApiAvailable === null) await checkRewardApiAvailability();
+
+        if (rewardApiAvailable) {
+          try {
+            const configRes = await api.get(`/api/reward-leaderboards/configs/event/${id}`);
+            const config = configRes.data;
+            if (config) {
+              editingRewardConfigId = config.id;
+              formData.totalRewards = config.max_reward_recipients;
+              if (config.reward_tiers && config.reward_tiers.length > 0) {
+                formData.rewardTiers = config.reward_tiers.map((t: any) => {
+                  const rewardName = t.reward_name || t.reward?.name || t.name || "";
+                  return {
+                    reward_name: rewardName,
+                    required_completions: t.required_completions || 0
+                  };
+                });
+              }
+            }
+          } catch (err: any) {
+            // If the endpoint 404s, mark unavailable to avoid further requests
+            if (err.response?.status === 404) {
+              console.warn("Reward leaderboard API not present; skipping config fetch.");
+              rewardApiAvailable = false;
+            } else if (err.response?.status === 500) {
+              console.warn("Reward config exists but has errors - will recreate on save");
+              editingRewardConfigId = null;
+            } else {
+              console.error("Error fetching reward config:", err);
+            }
           }
-        }
-      } catch (err: any) {
-        // Don't fail the whole page if reward config has issues
-        if (err.response?.status === 404) {
-            console.warn("No existing reward config - will create new one if needed");
-        } else if (err.response?.status === 500) {
-            console.warn("Reward config exists but has errors - will recreate on save");
-            // Clear any corrupt config
-            editingRewardConfigId = null;
         } else {
-            console.error("Error fetching reward config:", err);
+          // Service unavailable; skip fetching config
+          editingRewardConfigId = null;
         }
-        // Always continue - reward config is optional
+      } catch (outerErr) {
+        // Ensure we don't block the page on availability checks
+        console.warn('Skipping reward config due to availability check error', outerErr);
+        editingRewardConfigId = null;
       }
 
       Swal.close();
@@ -506,7 +531,13 @@
         }
       }
     } else {
-        Swal.fire({ icon: 'warning', title: 'ยังไม่ได้เลือกวันที่', text: 'กรุณาเลือกวันที่จากรายการก่อนกดเพิ่ม', background: '#1e293b', color: '#fff', confirmButtonColor: '#10b981' });
+      Swal.fire({
+        icon: 'warning',
+        title: 'ยังไม่ได้เลือกวันที่',
+        text: 'กรุณาเลือกวันที่จากรายการก่อนกดเพิ่ม',
+        customClass: { popup: 'swal-dark' },
+        confirmButtonColor: '#10b981'
+      });
     }
   }
   function removeSpecificDate(date: string) { 
@@ -557,7 +588,13 @@
     
     // Validate Inputs
     if (!validate()) {
-      Swal.fire({ title: lang.error, text: lang.fillAllFields, icon: 'error', background: '#1e293b', color: '#fff', confirmButtonColor: '#10b981' });
+      Swal.fire({
+        title: lang.error,
+        text: lang.fillAllFields,
+        icon: 'error',
+        customClass: { popup: 'swal-dark' },
+        confirmButtonColor: '#10b981'
+      });
       isSubmitting = false;
       return;
     }
@@ -571,7 +608,13 @@
     }
     
     try {
-      Swal.fire({ title: lang.saving, allowOutsideClick: false, didOpen: () => Swal.showLoading(), background: '#1e293b', color: '#fff', showConfirmButton: false });
+      Swal.fire({
+        title: lang.saving,
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        customClass: { popup: 'swal-dark' },
+        didOpen: () => Swal.showLoading()
+      });
 
       // ---------------------------------------------------------
       // 1. Upload Image
@@ -616,7 +659,7 @@
         is_published: formData.isPublic
       };
       
-      console.log("💾 Saving event...", payload);
+      // saving event
       
       let targetId = editingEventId;
 
@@ -778,10 +821,9 @@
                   try {
                       const checkRes = await api.get(`/api/reward-leaderboards/configs/event/${targetId}`);
                       const configData = Array.isArray(checkRes.data) ? checkRes.data[0] : checkRes.data;
-                      if (configData && (configData.id || configData.config_id)) {
-                          realConfigId = configData.id || configData.config_id;
-                          console.log(`🔍 Found existing config on server: ${realConfigId}`);
-                      }
+                        if (configData && (configData.id || configData.config_id)) {
+                            realConfigId = configData.id || configData.config_id;
+                          }
                   } catch (checkErr: any) {
                       if (checkErr.response?.status !== 404) {
                           console.warn("⚠️ Error checking existing config:", checkErr);
@@ -789,30 +831,26 @@
                   }
 
                   // 2. ถ้ามี -> UPDATE (PUT)
-                  if (realConfigId) {
-                      console.log(`🔄 Updating existing config ID ${realConfigId}...`);
-                      try {
-                          const updRes = await api.put(`/api/reward-leaderboards/configs/${realConfigId}`, rewardConfigPayload);
-                          editingRewardConfigId = realConfigId;
-                          console.log("✅ Config updated:", updRes.data);
+                    if (realConfigId) {
+                        try {
+                        const updRes = await api.put(`/api/reward-leaderboards/configs/${realConfigId}`, rewardConfigPayload);
+                        editingRewardConfigId = realConfigId;
                       } catch (updateErr: any) {
                           // 🔥 SPECIAL FIX: ถ้า Update ไม่ได้เพราะ Finalize ไปแล้ว ให้ลบแล้วสร้างใหม่
                           const errDetail = updateErr.response?.data?.detail;
                           const isFinalizedError = updateErr.response?.status === 400 && 
                                                  (typeof errDetail === 'string' && errDetail.includes('finalized'));
                           
-                          if (isFinalizedError) {
-                              console.warn("⚠️ Cannot update finalized leaderboard. Attempting RESET...");
+                              if (isFinalizedError) {
+                              // cannot update finalized leaderboard - attempt reset
                               
-                              try {
+                                  try {
                                   // 2.1 Delete Old Config
                                   await api.delete(`/api/reward-leaderboards/configs/${realConfigId}`);
-                                  console.log(`🗑️ Deleted finalized config ID ${realConfigId}`);
                                   
                                   // 2.2 Create New Config
                                   const createRes = await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
                                   editingRewardConfigId = createRes.data?.id || createRes.data?.config_id;
-                                  console.log("✅ Recreated new config:", editingRewardConfigId);
                                   
                                   Swal.fire({
                                     icon: 'info',
@@ -821,7 +859,7 @@
                                     toast: true, position: 'top-end', timer: 3000, background: '#3b82f6', color: '#fff'
                                   });
                               } catch (deleteErr: any) {
-                                  console.error("❌ Reset Failed (Cannot Delete):", deleteErr);
+                                  // reset failed
                                   // ถ้าลบไม่ได้ (เช่น ติด FK) ให้โยน Error เดิมออกไปเพื่อให้ catch ใหญ่ข้างล่างทำงาน
                                   throw updateErr; 
                               }
@@ -831,12 +869,9 @@
                       }
                     } else {
                       // 3. ถ้าไม่มี -> CREATE (POST)
-                      console.log(`✨ Creating new config...`);
                       try {
-                        console.debug('➡️ POST /api/reward-leaderboards/configs payload:', rewardConfigPayload);
                         const createRes = await api.post('/api/reward-leaderboards/configs', rewardConfigPayload);
                         editingRewardConfigId = createRes.data?.id || createRes.data?.config_id;
-                        console.log("✅ Config created:", editingRewardConfigId, createRes.data);
                       } catch (createErr: any) {
                         console.error('❌ Create config failed:', createErr);
                         console.error('response data:', createErr.response?.data);
@@ -856,9 +891,9 @@
                   // SQL สำหรับ Admin (เผื่อกรณีแก้ไม่ได้จริงๆ)
                   const adminSQL = `-- Delete leaderboard for event ${targetId}\nDELETE FROM reward_leaderboard_entries WHERE config_id IN (SELECT id FROM reward_leaderboard_configs WHERE event_id = ${targetId});\nDELETE FROM reward_leaderboard_configs WHERE event_id = ${targetId};`;
 
-                  Swal.fire({ 
-                    icon: 'warning', 
-                    title: 'Reward Config Issue', 
+                  Swal.fire({
+                    icon: 'warning',
+                    title: 'Reward Config Issue',
                     html: `
                       <div style="text-align:left">
                         <p style="margin:0 0 8px 0">บันทึกกิจกรรมสำเร็จ แต่การตั้งค่ารางวัลมีปัญหา:</p>
@@ -871,11 +906,11 @@
                     showConfirmButton: false,
                     showCancelButton: false,
                     width: 700,
-                    background: '#0b1220', color: '#fff',
+                    customClass: { popup: 'swal-dark' },
                     didOpen: () => {
                       const copyBtn = document.getElementById('swal-copy-sql');
                       const closeBtn = document.getElementById('swal-close-sql');
-                      if (copyBtn) copyBtn.addEventListener('click', () => { navigator.clipboard.writeText(adminSQL); Swal.fire({ icon: 'success', title: 'Copied', timer: 900, showConfirmButton: false, background: '#0b1220', color:'#fff' }); });
+                      if (copyBtn) copyBtn.addEventListener('click', () => { navigator.clipboard.writeText(adminSQL); Swal.fire({ icon: 'success', title: 'Copied', timer: 900, showConfirmButton: false, customClass: { popup: 'swal-dark' } }); });
                       if (closeBtn) closeBtn.addEventListener('click', () => { Swal.close(); });
                     }
                   });
@@ -883,21 +918,26 @@
           }
       }
       
-      await Swal.fire({ 
-        title: lang.success, 
-        text: editingEventId ? lang.eventUpdated : lang.eventCreated, 
-        icon: 'success', 
-        background: '#1e293b', color: '#fff', confirmButtonColor: '#10b981', 
-        timer: 1500, showConfirmButton: false 
+      await Swal.fire({
+        title: lang.success,
+        text: editingEventId ? lang.eventUpdated : lang.eventCreated,
+        icon: 'success',
+        customClass: { popup: 'swal-dark' },
+        confirmButtonColor: '#10b981',
+        timer: 1500,
+        showConfirmButton: false
       });
       goto('/organizer/events');
 
     } catch (error: any) {
       console.error('Submit Error:', error);
       const errMsg = error.response?.data?.detail || error.message || 'Unknown error';
-      Swal.fire({ 
-        title: lang.error, text: `Failed to save: ${errMsg}`, icon: 'error', 
-        background: '#1e293b', color: '#fff', confirmButtonColor: '#10b981' 
+      Swal.fire({
+        title: lang.error,
+        text: `Failed to save: ${errMsg}`,
+        icon: 'error',
+        customClass: { popup: 'swal-dark' },
+        confirmButtonColor: '#10b981'
       });
     } finally {
       isSubmitting = false;
@@ -1129,7 +1169,7 @@
 
 <style>
   :global(:root) { --ce-bg: #0f172a; --ce-card-bg: #1e293b; --ce-border: rgba(255, 255, 255, 0.08); --ce-text: #f8fafc; --ce-text-muted: #94a3b8; --ce-primary: #10b981; --ce-primary-hover: #059669; --ce-danger: #ef4444; --ce-warning: #f59e0b; }
-  .ce-wrapper { width: 100%; height: 100%; padding: 2rem 1.5rem; background: var(--ce-bg); overflow-y: auto; }
+  .ce-wrapper { width: 100%; height: 100%; padding: 2rem 1.5rem;  overflow-y: auto; }
   .ce-container { max-width: 1200px; margin: 0 auto; }
   .ce-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; gap: 1rem; flex-wrap: wrap; }
   .ce-title { font-size: 2rem; font-weight: 700; color: var(--ce-text); margin: 0; }

@@ -157,6 +157,8 @@
   let selectedEvent: Event | null = null;
   let submissions: Submission[] = [];
   let loading = false;
+  // Cache user profiles fetched from /api/users/{id}
+  const userCache: Record<string, any> = {};
   
   // Event Selection
   let eventsPage = 1;
@@ -288,6 +290,16 @@
     });
   }
 
+  function escapeHtml(input: any): string {
+    if (input === null || input === undefined) return '';
+    return String(input)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function formatDateRange(event: Event | undefined | null, lang: Language): string {
     if (!event || !event.startDate) return "";
     const start = new Date(event.startDate);
@@ -413,7 +425,7 @@
       const rawData = response.data;
       const dataList = Array.isArray(rawData) ? rawData : (rawData.proofs || []);
 
-      if (Array.isArray(dataList)) {
+        if (Array.isArray(dataList)) {
           submissions = dataList.map((item: any) => {
             const userObj = item.user || {};
             
@@ -432,7 +444,8 @@
               // ✅ [แก้ไข 4] Map ชื่อตัวแปรให้ตรงกับ JSON
               id: item.participation_id || item.id, 
               runnerName: userObj.full_name || userObj.display_name || item.runner_name || "Unknown",
-              odySd: userObj.nisit_id || userObj.student_id || item.student_id || "-",
+              // Try many common keys used by different backends (nisit_id, nisitId, student_id, studentId)
+              odySd: userObj.nisit_id || userObj.nisitId || userObj.student_id || userObj.studentId || item.student_id || item.nisit_id || item.odySd || "-",
               email: userObj.email || item.email || "-",
               
               // ✅ [แก้ไข 5] ใช้ proof_image_url
@@ -450,6 +463,36 @@
               userId: userObj.id || item.user_id || item.userId || null,
             };
           });
+        // Prefetch user profiles for submissions (when userId present)
+        try {
+          const userIds = Array.from(new Set(submissions.map(s => s.userId).filter((x): x is string | number => Boolean(x))));
+          await Promise.all(userIds.map(async (uid: string | number) => {
+            const key = String(uid);
+            if (userCache[key] !== undefined) return;
+            try {
+              const res = await api.get(endpoints.users.getById(uid as string | number));
+              userCache[key] = res.data;
+            } catch (e) {
+              console.warn('Failed to fetch user profile', uid, e);
+              userCache[key] = null;
+            }
+          }));
+
+          // Merge cached nisit_id/email into submissions when missing
+          submissions = submissions.map(s => {
+            const key = String(s.userId || '');
+            const u = userCache[key];
+            const nisitFromCache = u ? (u.nisit_id || u.nisitId || null) : null;
+            const emailFromCache = u ? (u.email || null) : null;
+            return {
+              ...s,
+              odySd: (s.odySd && s.odySd !== '-') ? s.odySd : (nisitFromCache || '-') ,
+              email: (s.email && s.email !== '-') ? s.email : (emailFromCache || '-')
+            } as Submission;
+          });
+        } catch (e) {
+          console.warn('User prefetch failed', e);
+        }
       } else {
           submissions = [];
       }
@@ -592,19 +635,41 @@
               if (!uid) return;
               const userRewards = await fetchUserRewards(uid);
               if (Array.isArray(userRewards) && userRewards.length > 0) {
-                const list = userRewards.map((r: any) => {
+                const cards = userRewards.map((r: any) => {
                   const when = r.rewarded_at || r.created_at || r.awarded_at || '';
                   const whenFmt = when ? formatTimestamp(when) : '-';
-                  return `<li style="margin-bottom:6px;"><strong>${r.name || r.reward_name || 'Reward'}</strong> — ${whenFmt}</li>`;
+                  const title = (r.name || r.reward_name || r.title || '').toString().trim() || 'Unnamed reward';
+                  const badge = (r.badge_image_url || r.image_url || '');
+                  return `
+                    <div style="display:flex;align-items:center;gap:12px;padding:10px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03);">
+                      <div style="width:44px;height:44px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#0f172a;display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,0.04);">
+                        ${badge ? `<img src="${badge}" alt="badge" style="width:100%;height:100%;object-fit:cover;" onerror="this.onerror=null;this.src='https://placehold.co/44x44/1e293b/94a3b8?text=?';"/>` : `<span style=\"color:#94a3b8;font-weight:700;\">#</span>`}
+                      </div>
+                      <div style="flex:1;min-width:0;">
+                        <div style="font-weight:700;color:#e6edf3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(title)}</div>
+                        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">${whenFmt}</div>
+                      </div>
+                    </div>
+                  `;
                 }).join('');
 
                 Swal.fire({
                   title: 'Assigned Rewards',
                   html: `
-                    <div style="text-align:left; max-height:280px; overflow:auto; padding:6px 4px;">
-                      <ul style="margin:0;padding-left:18px;color:#e6edf3">${list}</ul>
+                    <div style="text-align:left; max-height:320px; overflow:auto; padding:8px 4px; display:flex;flex-direction:column;gap:8px;">
+                      ${cards}
                     </div>
                   `,
+                  icon: 'info',
+                  background: '#0b1220',
+                  color: '#fff',
+                  width: 520,
+                  confirmButtonColor: '#10b981'
+                });
+              } else {
+                Swal.fire({
+                  title: 'Assigned Rewards',
+                  html: `<div style="text-align:center;padding:18px;color:#94a3b8;">No rewards were assigned.</div>`,
                   icon: 'info',
                   background: '#0b1220',
                   color: '#fff',
@@ -1516,6 +1581,8 @@
     overflow-y: auto;
     max-height: calc(100vh - 260px); /* leave space for header, stats and footer/pagination */
     padding-right: 8px; /* room for scrollbar */
+    margin-top: 1.25rem; /* add space between filter/search area and proofs */
+    padding-top: 0.75rem; /* extra internal spacing so top of cards don't touch sticky header */
   }
 
   @media (max-width: 768px) {
@@ -1534,6 +1601,9 @@
     gap: 1.5rem;
     flex-wrap: wrap;
   }
+
+  /* use soft box-shadow on header instead of a pseudo-element line */
+  .submissions-header { box-shadow: 0 8px 20px rgba(0,0,0,0.16); }
 
   .btn-back {
     background: rgba(100, 116, 139, 0.2);

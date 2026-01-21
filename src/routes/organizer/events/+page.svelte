@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import Swal from 'sweetalert2';
   import axios from 'axios';
@@ -16,6 +16,21 @@
     const token = localStorage.getItem('access_token');
     if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
+  });
+
+  // ---------- Performance helpers ----------
+  const CACHE_TTL = 60 * 1000; // 60s
+  const rewardConfigCache: Map<string, { value: boolean; ts: number }> = new Map();
+  const holidaysCache: Map<string, { value: any[]; ts: number }> = new Map();
+  const pendingCache: Map<string, { value: number; ts: number }> = new Map();
+
+  // Single controller to allow cancelling background fetches when component unmounts
+  const pageController = new AbortController();
+
+  // scheduleBackground removed: rely on direct async calls and AbortController for cancellation.
+
+  onDestroy(() => {
+    try { pageController.abort(); } catch (e) { /* ignore */ }
   });
 
   type Language = "th" | "en";
@@ -110,7 +125,11 @@
   onMount(() => {
     // Fetch events shortly after mount. Avoid using requestIdleCallback
     // to prevent browser Intervention console messages.
-    setTimeout(() => fetchEvents(), 200);
+    // First check whether the reward-leaderboards API exists to avoid many 404s
+    setTimeout(async () => {
+      await checkRewardApiAvailability();
+      fetchEvents();
+    }, 200);
   });
 
   function resolveImageUrl(img: string | null) {
@@ -195,41 +214,59 @@
 
   // ✅ ฟังก์ชันดึง Config รางวัล (ปรับปรุง Reactivity)
   async function fetchRewardConfigsForEvents() {
+    // If the leaderboard API is not available, skip checks to avoid noisy 404s
+    if (!rewardApiAvailable) return;
     const token = localStorage.getItem("access_token");
     const headers = token ? { "Authorization": `Bearer ${token}` } : {};
     const BATCH_SIZE = 5;
     const eventsCopy = [...events];
+    const updateMap: Record<string, { hasReward?: boolean }> = {};
 
     for (let i = 0; i < eventsCopy.length; i += BATCH_SIZE) {
       const batch = eventsCopy.slice(i, i + BATCH_SIZE);
       const results = await Promise.allSettled(
         batch.map(async (event) => {
+          // check cache first
+          const cached = rewardConfigCache.get(String(event.id));
+          if (cached && (Date.now() - cached.ts) < CACHE_TTL) {
+            return { eventId: event.id, hasReward: cached.value };
+          }
           try {
-            const res = await api.get(`/api/reward-leaderboards/configs/event/${event.id}`, { headers });
-            // ✅ เช็ค is_active ว่าเป็น true หรือไม่
-            if (res.status === 200 && res.data && res.data.is_active === true) {
-                console.log(`✅ Event ${event.id}: Found Reward Config`);
-                return { eventId: event.id, hasReward: true };
-            }
+            const res = await api.get(`/api/reward-leaderboards/configs/event/${event.id}`, { headers, signal: pageController.signal });
+            const has = res.status === 200 && res.data && res.data.is_active === true;
+            rewardConfigCache.set(String(event.id), { value: has, ts: Date.now() });
+            return { eventId: event.id, hasReward: has };
+          } catch (err) {
+            // store negative result to avoid repeated failing calls
+            rewardConfigCache.set(String(event.id), { value: false, ts: Date.now() });
             return { eventId: event.id, hasReward: false };
-          } catch (err) { 
-            return { eventId: event.id, hasReward: false }; 
           }
         })
       );
 
-      results.forEach((result) => {
-        if (result.status === "fulfilled") {
-          const { eventId, hasReward } = result.value;
-          const index = events.findIndex(e => e.id === eventId);
-          if (index !== -1) {
-             // ✅ สำคัญ: สร้าง Object ใหม่ เพื่อให้ Svelte รู้ว่ามีการเปลี่ยนแปลง
-             events[index] = { ...events[index], hasRewardProgram: hasReward };
-          }
-        }
+      results.forEach((r) => {
+        if (r.status === 'fulfilled') updateMap[r.value.eventId] = { hasReward: r.value.hasReward };
       });
-      // ✅ Trigger Svelte update
-      events = [...events];
+    }
+
+    if (Object.keys(updateMap).length > 0) {
+      events = events.map(ev => ({ ...ev, hasRewardProgram: updateMap[ev.id]?.hasReward ?? ev.hasRewardProgram }));
+    }
+  }
+
+  // Feature-detect whether reward-leaderboards endpoints exist on this server.
+  // If not present, set `rewardApiAvailable = false` so we avoid per-event 404s.
+  let rewardApiAvailable = true;
+  async function checkRewardApiAvailability() {
+    try {
+      const token = localStorage.getItem("access_token");
+      const headers = token ? { "Authorization": `Bearer ${token}` } : {};
+      // Try a lightweight list request; if it 404s the service isn't enabled
+      const res = await api.get('/api/reward-leaderboards/configs', { headers });
+      rewardApiAvailable = res && res.status >= 200 && res.status < 300;
+    } catch (err: any) {
+      // any error -> mark unavailable to avoid repeated calls
+      rewardApiAvailable = false;
     }
   }
 
@@ -238,34 +275,36 @@
     const headers = token ? { "Authorization": `Bearer ${token}` } : {};
     const BATCH_SIZE = 5; 
     const eventsCopy = [...events];
+    const holidaysMap: Record<string, any[]> = {};
 
     for (let i = 0; i < eventsCopy.length; i += BATCH_SIZE) {
       const batch = eventsCopy.slice(i, i + BATCH_SIZE);
       const results = await Promise.allSettled(
         batch.map(async (event) => {
+          // cache check
+          const cached = holidaysCache.get(String(event.id));
+          if (cached && (Date.now() - cached.ts) < CACHE_TTL) {
+            return { eventId: event.id, holidays: cached.value };
+          }
           try {
-            const res = await api.get(`/api/events/${event.id}/holidays`, { headers });
-            if (res.status === 200 && res.data.holidays) {
-              return { eventId: event.id, holidays: res.data.holidays };
-            }
+            const res = await api.get(`/api/events/${event.id}/holidays`, { headers, signal: pageController.signal });
+            const hs = res.status === 200 && res.data.holidays ? res.data.holidays : [];
+            holidaysCache.set(String(event.id), { value: hs, ts: Date.now() });
+            return { eventId: event.id, holidays: hs };
+          } catch (err) {
+            holidaysCache.set(String(event.id), { value: [], ts: Date.now() });
             return { eventId: event.id, holidays: [] };
-          } catch (err) { 
-            return { eventId: event.id, holidays: [] }; 
           }
         })
       );
 
-      results.forEach((result) => {
-        if (result.status === "fulfilled") {
-          const { eventId, holidays } = result.value;
-          const index = events.findIndex(e => e.id === eventId);
-          if (index !== -1) {
-             // ✅ สร้าง Object ใหม่เช่นกัน
-             events[index] = { ...events[index], holidays: holidays };
-          }
-        }
+      results.forEach((r) => {
+        if (r.status === 'fulfilled') holidaysMap[r.value.eventId] = r.value.holidays;
       });
-      events = [...events];
+    }
+
+    if (Object.keys(holidaysMap).length > 0) {
+      events = events.map(ev => ({ ...ev, holidays: holidaysMap[ev.id] ?? ev.holidays }));
     }
   }
 
@@ -274,12 +313,13 @@
     const headers = token ? { "Authorization": `Bearer ${token}` } : {};
     const BATCH_SIZE = 5;
     const eventsCopy = [...events];
+    const pendingMap: Record<string, number> = {};
     for (let i = 0; i < eventsCopy.length; i += BATCH_SIZE) {
       const batch = eventsCopy.slice(i, i + BATCH_SIZE);
       const results = await Promise.allSettled(
         batch.map(async (event) => {
           try {
-            const res = await api.get(`/api/participations/event/${event.id}/report`, { headers });
+            const res = await api.get(`/api/participations/event/${event.id}/report`, { headers, signal: pageController.signal });
             if (res.status === 200) {
               const data = res.data.data || res.data;
               const pending = Array.isArray(data) ? data.filter((s: any) => s.status === "proof_submitted").length : 0;
@@ -289,16 +329,13 @@
           } catch (err) { return { eventId: event.id, pendingCount: 0 }; }
         })
       );
-      results.forEach((result) => {
-        if (result.status === "fulfilled") {
-          const { eventId, pendingCount } = result.value;
-          const index = events.findIndex(e => e.id === eventId);
-          if (index !== -1) {
-             events[index] = { ...events[index], pendingCount: pendingCount };
-          }
-        }
+      results.forEach((r) => {
+        if (r.status === 'fulfilled') pendingMap[r.value.eventId] = r.value.pendingCount;
       });
-      events = [...events];
+    }
+
+    if (Object.keys(pendingMap).length > 0) {
+      events = events.map(ev => ({ ...ev, pendingCount: pendingMap[ev.id] ?? ev.pendingCount }));
     }
   }
   
@@ -309,12 +346,10 @@
       const rawEvents = response.data.events || response.data || [];
       events = rawEvents.map((e: any) => mapToEvent(e));
       
-      // ✅ เรียกดึงข้อมูลเพิ่มเติม
-      fetchPendingCountsForEvents(); 
+      // ✅ เรียกดึงข้อมูลเพิ่มเติม (run in background)
+      fetchPendingCountsForEvents();
       fetchHolidaysForEvents();
-      fetchRewardConfigsForEvents(); 
-      // Ensure lazy images are observed after events have been rendered
-      setTimeout(() => lazyLoadImages(), 50);
+      fetchRewardConfigsForEvents();
     } catch (error) { console.error('Error fetching events:', error);
     } 
     finally { eventsLoading = false;
@@ -356,35 +391,7 @@
   function getPendingPercentage(event: Event): number { if (!event.pendingCount || !event.totalSlots) return 0; return Math.min((event.pendingCount / event.totalSlots) * 100, 100);
   }
 
-  // Lazy-load helper for images: use `lazy-img` class and `data-src` attribute on <img>
-  function lazyLoadImages() {
-    if (typeof window === 'undefined') return;
-    const imgs = Array.from(document.querySelectorAll('img.lazy-img')) as HTMLImageElement[];
-    if (!imgs.length) return;
-    if (!('IntersectionObserver' in window)) {
-      imgs.forEach(img => {
-        const s = img.dataset.src;
-        if (s) img.src = s;
-      });
-      return;
-    }
-
-    const io = new IntersectionObserver((entries, observer) => {
-      entries.forEach(entry => {
-        if (!entry.isIntersecting) return;
-        const img = entry.target as HTMLImageElement;
-        const src = img.dataset.src;
-        if (src) {
-          img.src = src;
-          img.removeAttribute('data-src');
-          img.classList.add('loaded');
-        }
-        observer.unobserve(img);
-      });
-    }, { rootMargin: '200px' });
-
-    imgs.forEach(i => io.observe(i));
-  }
+  // native `loading="lazy"` is used on images; no JS lazy-loader required.
   
   async function handleViewDetails(event: Event) {
     selectedEvent = event; 
@@ -392,7 +399,7 @@
     detailLoading = true;
     
     try {
-      const response = await api.get(`/api/events/${event.id}`);
+      const response = await api.get(`/api/events/${event.id}`, { signal: pageController.signal });
       let details = mapToEvent(response.data);
       const rewards = response.data.rewards || [];
       const holidays = response.data.holidays || [];
@@ -408,14 +415,14 @@
       };
       
       if (!selectedEvent.holidays || selectedEvent.holidays.length === 0) {
-         const holRes = await api.get(`/api/events/${event.id}/holidays`);
-         if (holRes.data && holRes.data.holidays) {
-            selectedEvent.holidays = holRes.data.holidays;
-         }
+        const holRes = await api.get(`/api/events/${event.id}/holidays`, { signal: pageController.signal }).catch(() => null);
+        if (holRes && holRes.data && holRes.data.holidays) {
+          selectedEvent.holidays = holRes.data.holidays;
+        }
       }
 
       // ✅ Double check rewards config for detail view
-      const rewardConfigRes = await api.get(`/api/reward-leaderboards/configs/event/${event.id}`).catch(() => null);
+      const rewardConfigRes = await api.get(`/api/reward-leaderboards/configs/event/${event.id}`, { signal: pageController.signal }).catch(() => null);
       if (rewardConfigRes && rewardConfigRes.status === 200 && rewardConfigRes.data && rewardConfigRes.data.is_active) {
           selectedEvent.hasRewardProgram = true;
           // ✅ บังคับ Refresh Modal ด้วยการ Re-assign
@@ -483,11 +490,11 @@
           <div class="glass-card">
             <div class="card-img-wrapper">
               <img
-                class="card-img lazy-img"
-                data-src={event.image || 'https://placehold.co/400x200/1e293b/64748b?text=No+Image'}
-                src={IMAGE_PLACEHOLDER}
+                class="card-img"
+                src={event.image || IMAGE_PLACEHOLDER}
                 alt={event.title}
                 decoding="async"
+                loading="lazy"
                 on:error={handleImgError}
               />
               <div class="status-badge-overlay">

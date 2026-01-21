@@ -76,3 +76,60 @@ table td, table th {
   :root { --nav-height: 64px; }
   .common-page-padding { padding-top: calc(var(--nav-height) + 16px) !important; }
 }
+
+/* Loading / spinner defaults: prefer muted gray for inactive parts to match theme */
+.loading-state .spinner,
+.loading-state .loading-spinner,
+.loading-state .loading-spinner svg,
+.loading-state .mini-spinner,
+.loading-state .btn-spinner,
+.spinner,
+.loading-spinner,
+.mini-spinner,
+.btn-spinner {
+  /* use theme muted color where available, fallback to neutral gray */
+  color: var(--text-muted, #94a3b8);
+}
+
+/* Circular CSS spinners that use borders should use a muted base and primary accent */
+.loading-spinner,
+.mini-spinner,
+.spinner {
+  border-color: rgba(148,163,184,0.12) !important; /* muted base */
+  border-top-color: var(--primary, #10b981) !important; /* accent */
+}
+
+/* SVG-based spinners using stroke=currentColor will inherit the muted color above */
+.loading-state .spinner svg,
+.spinner svg,
+.btn-spinner svg {
+  color: var(--text-muted, #94a3b8);
+  stroke: currentColor;
+}
+
+/* SweetAlert dark popup (global) - ensure loading/modal matches app theme */
+.swal-dark {
+  background: var(--bg-card, #1e293b) !important;
+  color: var(--text-main, #f8fafc) !important;
+  border: 1px solid rgba(255,255,255,0.06) !important;
+  border-radius: 12px !important;
+}
+.swal-dark .swal2-title {
+  color: var(--text-main, #f8fafc) !important;
+}
+.swal-dark .swal2-html-container {
+  color: var(--text-muted, #cbd5e1) !important;
+}
+.swal-dark .swal2-confirm {
+  background: var(--primary, #10b981) !important;
+  box-shadow: none !important;
+}
+/* Styling for SweetAlert loading spinner inside the dark popup */
+.swal-dark .swal2-loading {
+  color: var(--text-muted, #94a3b8) !important;
+}
+.swal-dark .swal2-loader,
+.swal-dark .swal2-spinner {
+  border-color: rgba(148,163,184,0.12) !important;
+  border-top-color: var(--primary, #10b981) !important;
+}

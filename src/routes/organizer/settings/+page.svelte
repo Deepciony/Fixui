@@ -865,20 +865,21 @@
   }
 
   /* SweetAlert Customization */
+  /* Use theme variables so SweetAlert popups match the app's gray/dark theme */
   :global(.swal-dark) {
-    background: #1e293b !important;
-    color: #f8fafc !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    border-radius: 16px !important;
+    background: var(--bg-card, #1e293b) !important;
+    color: var(--text-main, #f8fafc) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    border-radius: 12px !important;
   }
   :global(.swal-dark .swal2-title) {
-    color: #f8fafc !important;
+    color: var(--text-main, #f8fafc) !important;
   }
   :global(.swal-dark .swal2-html-container) {
-    color: #cbd5e1 !important;
+    color: var(--text-muted, #cbd5e1) !important;
   }
   :global(.swal-dark .swal2-confirm) {
-    background: #10b981 !important;
+    background: var(--primary, #10b981) !important;
     box-shadow: none !important;
   }
 
